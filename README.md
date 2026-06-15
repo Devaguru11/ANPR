@@ -29,6 +29,7 @@ chmod +x scripts/setup-dev.sh scripts/start-dev.sh
 ```
 
 This starts MySQL + Redis, installs npm/Python deps, and seeds a local database with demo ANPR data.
+On first real-DB startup, the API also imports [aiserver_anpr_last_3_days.sql](aiserver_anpr_last_3_days.sql) if the dump tables are missing, then restores the local demo admin and watchlist seeds.
 
 ### 2. Start the app
 

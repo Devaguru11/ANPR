@@ -118,7 +118,12 @@ function mapRuleRow(r, siteName, cameraNameMap = null) {
   const listIds = parseJson(r.vehicleListIds, []);
   const listName = Array.isArray(listIds) && listIds.length ? listIds[0] : null;
   const cameraIds = extractCameraIds(r.conditions);
-  const cameraNames = cameraIds.map((id) => cameraNameMap?.get(id) ?? cameraNameMap?.get(String(id)) ?? id);
+  const cameraNames = cameraIds.map((id) => {
+    if (cameraNameMap instanceof Map) {
+      return cameraNameMap.get(id) ?? cameraNameMap.get(String(id)) ?? id;
+    }
+    return cameraNameMap?.[id] ?? cameraNameMap?.[String(id)] ?? id;
+  });
   return {
     id: r.id,
     enabled: Boolean(r.enabled),

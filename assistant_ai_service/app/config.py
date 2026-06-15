@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     log_dir: str = str(ROOT / 'logs' / 'assistant_ai')
     analytics_log_dir: str = str(ROOT / 'logs' / 'assistant_enhance')
     legacy_log_dir: str = str(ROOT / 'logs' / 'assistant')
-    model_config = SettingsConfigDict(env_file=str(ROOT / '.env'), extra='ignore')
+    model_config = SettingsConfigDict(env_file=(str(ROOT / '.env'), str(ROOT / '.env.example')), extra='ignore')
 settings = Settings()
 for attr in ('log_dir', 'analytics_log_dir', 'legacy_log_dir'):
     val = getattr(settings, attr)

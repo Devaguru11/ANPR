@@ -140,8 +140,8 @@ router.post("/rules", async (req, res) => {
     const siteId = body.site_id ?? 1;
     const [result] = await pool.query(
       `INSERT INTO lpr_rules
-        (enabled, barrierOpen, filterType, vehicleListIds, name, access_type, security_type, priority, site_id, conditions, notes, valid_from, valid_to, created_at, updated_at)
-       VALUES (1, 0, 'plate', ?, ?, ?, ?, 10, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        (enabled, barrierOpen, filterType, vehicleListIds, name, access_type, security_type, priority, site_id, conditions, valid_from, valid_to, created_at, updated_at)
+       VALUES (1, 0, 'plate', ?, ?, ?, ?, 10, ?, ?, ?, ?, NOW(), NOW())`,
       [
         vehicleListIds,
         body.name,
@@ -149,7 +149,6 @@ router.post("/rules", async (req, res) => {
         body.security_type,
         siteId,
         conditions,
-        body.notes ?? "",
         body.valid_from ?? null,
         body.valid_to ?? null,
       ]
@@ -172,7 +171,7 @@ router.put("/rules/:id", async (req, res) => {
     await pool.query(
       `UPDATE lpr_rules SET
         filterType = 'plate', vehicleListIds = ?, name = ?, access_type = ?, security_type = ?,
-        site_id = ?, conditions = ?, notes = ?, valid_from = ?, valid_to = ?, updated_at = NOW()
+        site_id = ?, conditions = ?, valid_from = ?, valid_to = ?, updated_at = NOW()
        WHERE id = ?`,
       [
         '""',
@@ -181,7 +180,6 @@ router.put("/rules/:id", async (req, res) => {
         body.security_type,
         body.site_id ?? 1,
         conditions,
-        body.notes ?? "",
         body.valid_from ?? null,
         body.valid_to ?? null,
         req.params.id,

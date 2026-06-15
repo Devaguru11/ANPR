@@ -1,5 +1,6 @@
 const path = require("path");
 require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, "..", ".env.example") });
 
 const smtpEnv = path.join(__dirname, "..", "smtp.env");
 require("dotenv").config({ path: smtpEnv });
