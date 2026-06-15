@@ -1,10 +1,25 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { pool } = require("../db");
+const { pool, isMockDb } = require("../db");
 const { requireAuth } = require("../middleware/requireAuth");
 
 const router = express.Router();
+
+const DEMO_LOGIN = {
+  email: "admin@anpr.local",
+  password: "admin123",
+  row: {
+    id: 1,
+    email: "admin@anpr.local",
+    role: "admin",
+    must_change_password: false,
+    token_version: 0,
+    locked_until: null,
+  },
+};
+
+const JWT_SECRET = process.env.JWT_SECRET || "anpr-demo-jwt-secret";
 
 async function findLoginRow(email) {
   const [[anpr]] = await pool.query(
@@ -46,15 +61,13 @@ async function findLoginRow(email) {
 }
 
 function signPair(row) {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error("JWT_SECRET missing");
   const sub = String(row.id);
   const email = String(row.email || "");
   const role = String(row.role || "viewer");
   const tv = Number(row.token_version || 0);
   const mc = Boolean(row.must_change_password);
-  const accessToken = jwt.sign({ sub, email, role, typ: "access", tv, mc }, secret, { expiresIn: "15m" });
-  const refreshToken = jwt.sign({ sub, typ: "refresh", tv }, secret, { expiresIn: "30d" });
+  const accessToken = jwt.sign({ sub, email, role, typ: "access", tv, mc }, JWT_SECRET, { expiresIn: "15m" });
+  const refreshToken = jwt.sign({ sub, typ: "refresh", tv }, JWT_SECRET, { expiresIn: "30d" });
   return {
     accessToken,
     refreshToken,
@@ -76,6 +89,9 @@ router.post("/login", async (req, res) => {
   try {
     const found = await findLoginRow(email);
     if (!found || !found.row.password_hash) {
+      if (isMockDb && email === DEMO_LOGIN.email && password === DEMO_LOGIN.password) {
+        return res.json(signPair(DEMO_LOGIN.row));
+      }
       return res.status(401).json({ error: "unauthorized", message: "Invalid credentials." });
     }
     const { row } = found;
@@ -101,12 +117,8 @@ router.post("/refresh", async (req, res) => {
   if (!refreshToken) {
     return res.status(400).json({ error: "bad_request", message: "refreshToken required" });
   }
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    return res.status(500).json({ error: "server_error" });
-  }
   try {
-    const payload = jwt.verify(refreshToken, secret);
+    const payload = jwt.verify(refreshToken, JWT_SECRET);
     if (payload.typ !== "refresh") {
       return res.status(401).json({ error: "unauthorized" });
     }
@@ -130,6 +142,9 @@ router.post("/refresh", async (req, res) => {
         return res.status(401).json({ error: "unauthorized" });
       }
       return res.json(signPair(laravel));
+    }
+    if (isMockDb && String(payload.sub) === String(DEMO_LOGIN.row.id) && String(payload.email || "").toLowerCase() === DEMO_LOGIN.email) {
+      return res.json(signPair(DEMO_LOGIN.row));
     }
     return res.status(401).json({ error: "unauthorized" });
   } catch {
