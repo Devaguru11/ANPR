@@ -1,0 +1,32 @@
+import { Box, type SxProps, type Theme } from "@mui/material";
+import { PNP_BADGE_SRC } from "../lib/pnpAssets";
+
+type Props = {
+
+  size?: number;
+  alt?: string;
+  sx?: SxProps<Theme>;
+};
+
+export function PnpBadge({ size = 130, alt = "Philippine National Police", sx }: Props) {
+  const height = Math.round(size * 1.38);
+
+  return (
+    <Box
+      component="img"
+      src={PNP_BADGE_SRC}
+      alt={alt}
+      sx={{
+        width: size,
+        height,
+        maxWidth: "100%",
+        objectFit: "contain",
+        objectPosition: "center center",
+        display: "block",
+        flexShrink: 0,
+        filter: "drop-shadow(0 2px 10px rgba(0,0,0,0.35))",
+        ...sx,
+      }}
+    />
+  );
+}

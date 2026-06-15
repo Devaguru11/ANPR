@@ -1,0 +1,17 @@
+[Unit]
+Description=Assistant Stable Service — /assistant only, frozen (127.0.0.1:9001)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=aiserver
+Group=aiserver
+WorkingDirectory=/home/aiserver/mern-vsp/assistant_ai_service
+EnvironmentFile=/home/aiserver/mern-vsp/assistant_ai_service/.env
+ExecStart=/home/aiserver/mern-vsp/assistant_ai_service/scripts/start_service.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

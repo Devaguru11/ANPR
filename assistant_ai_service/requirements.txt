@@ -1,0 +1,21 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.2
+SQLAlchemy>=2.0.36
+mysql-connector-python>=9.1.0
+redis>=5.2.0
+httpx>=0.27.0
+langgraph>=0.2.0
+langchain-core>=0.3.0
+sqlparse>=0.5.0
+python-dateutil>=2.9.0
+rapidfuzz>=3.10.0
+prometheus-client>=0.21.0
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+
+# vLLM — install separately with CUDA 12.4 wheels (T4 / driver 535):
+# pip install vllm==0.8.5 --extra-index-url https://download.pytorch.org/whl/cu124

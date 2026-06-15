@@ -1,0 +1,29 @@
+{
+  "locale": "en",
+  "region": {
+    "label": "Philippines",
+    "countryCode": "PH"
+  },
+  "timezone": {
+    "db": {
+      "iana": "Asia/Kolkata",
+      "sqlOffset": "+05:30",
+      "label": "IST (DB wall clock)"
+    },
+    "display": {
+      "iana": "Asia/Manila",
+      "sqlOffset": "+08:00",
+      "label": "Philippines"
+    },
+    "displayHoursAheadOfDb": 2.5
+  },
+  "cameraOnlineStaleMinutes": 5,
+  "waterflow": {
+    "cameraId": "AEYE_6",
+    "siteName": "Bridge",
+    "dayStartHour": 4,
+    "thresholdAlert": 70,
+    "thresholdAlarm": 110,
+    "thresholdCritical": 150
+  }
+}

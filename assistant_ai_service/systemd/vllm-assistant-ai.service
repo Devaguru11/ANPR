@@ -1,0 +1,16 @@
+[Unit]
+Description=vLLM server for Assistant AI (Qwen2.5-7B-Instruct-AWQ)
+After=network.target
+
+[Service]
+Type=simple
+User=aiserver
+Group=aiserver
+WorkingDirectory=/home/aiserver/mern-vsp/assistant_ai_service
+EnvironmentFile=/home/aiserver/mern-vsp/assistant_ai_service/.env
+ExecStart=/home/aiserver/mern-vsp/assistant_ai_service/scripts/start_vllm.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
