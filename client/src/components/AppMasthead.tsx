@@ -203,7 +203,7 @@ export function AppMasthead({ pageTitle, pageSubtitle, userEmail, onSignOut }: P
           <ListItemIcon>
             <LogoutIcon fontSize="small" sx={{ color: "error.main" }} />
           </ListItemIcon>
-          <ListItemText primary="Sign Out" primaryTypographyProps={{ fontSize: "0.875rem", fontWeight: 600 }} />
+          <ListItemText primary={<Typography sx={{ fontSize: "0.875rem", fontWeight: 600, color: "error.main" }}>Sign Out</Typography>} />
         </MenuItem>
       </Menu>
     </Box>
