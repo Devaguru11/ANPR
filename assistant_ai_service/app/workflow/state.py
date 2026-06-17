@@ -7,23 +7,15 @@ class GraphState(TypedDict, total=False):
     normalized_question: str
     conversation_context: str
     intent: str
-    intent_detection_reasoning: str
     entities: dict[str, Any]
     entity_resolution: list[dict[str, Any]]
     confidence: float
-    scoped_schema: dict[str, Any]
-    query_plan: dict[str, Any]
     plan: dict[str, Any]
     sql: str
-    sql_correction_message: str
     sql_errors: list[str]
-    sql_validation_error: str
-    retry_count: int
     columns: list[str]
     rows: list[tuple]
     row_count: int
-    relaxation_attempted: bool
-    truncated: bool
     analytics_output: dict[str, Any]
     final_answer: str
     error: str

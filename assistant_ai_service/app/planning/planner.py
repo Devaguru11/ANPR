@@ -1,7 +1,4 @@
 from __future__ import annotations
-import json
-import re
-from typing import Any
 from app.planning.business_concepts import concept_to_metric
 from app.planning.business_semantic_resolver import BusinessSemanticResolution
 from app.planning.dimensions import dimension_names, relocate_time_filters
@@ -12,98 +9,8 @@ from app.planning.retrieval_scope import RetrievalScopeSpec, apply_retrieval_sco
 from app.planning.semantic_coherence import LISTING_SCOPE_KINDS, reconcile_objective_and_scope
 from app.planning.scope import load_previous_plan, merge_scope, should_inherit
 from app.planning.temporal_resolver import TemporalResolution
-from app.llm.vllm_client import VLLMClient
 
 class AnalyticalPlanner:
-
-    def __init__(self, llm: VLLMClient | None = None) -> None:
-        self.llm = llm
-
-    async def build_query_plan(self, question: str, scoped_schema: dict[str, Any], conversation_context: str, memory_state: dict[str, Any], previous_query_plan: dict[str, Any] | None=None) -> dict[str, Any]:
-        question_n = re.sub(r"\s+", " ", question.strip())
-        schema_text = json.dumps(scoped_schema or {}, ensure_ascii=False, default=str)
-        memory_text = json.dumps(memory_state or {}, ensure_ascii=False, default=str)
-        previous_text = json.dumps(previous_query_plan or {}, ensure_ascii=False, default=str)
-        system = (
-            "You are a query planner for an ANPR data assistant. "
-            "Use the scoped schema and Redis conversation memory to produce a concise query plan. "
-            "Return JSON only with keys: tables, filters, joins, time_range, limit, order_by, reasoning."
-        )
-        user = (
-            f"User question: {question_n}\n\n"
-            f"Conversation context:\n{conversation_context[:3000]}\n\n"
-            f"Redis memory:\n{memory_text[:4000]}\n\n"
-            f"Previous query plan:\n{previous_text[:3000]}\n\n"
-            f"Scoped schema:\n{schema_text[:6000]}\n\n"
-            "Resolve references like 'same vehicle as before' and 'yesterday' using conversation memory. "
-            "Return a plan that only uses tables and columns present in the scoped schema."
-        )
-        if self.llm:
-            try:
-                data = await self.llm.chat_json(system, user, max_tokens=768)
-                if isinstance(data, dict):
-                    return self._normalize_query_plan(data, scoped_schema, memory_state, question_n)
-            except Exception:
-                pass
-        return self._fallback_query_plan(question_n, scoped_schema, memory_state, previous_query_plan)
-
-    def _normalize_query_plan(self, data: dict[str, Any], scoped_schema: dict[str, Any], memory_state: dict[str, Any], question: str) -> dict[str, Any]:
-        tables = list(dict.fromkeys([str(t) for t in (data.get('tables') or []) if str(t).strip()]))
-        filters = data.get('filters') if isinstance(data.get('filters'), dict) else {}
-        joins = data.get('joins') if isinstance(data.get('joins'), list) else []
-        time_range = data.get('time_range') if isinstance(data.get('time_range'), dict) else {}
-        limit = data.get('limit')
-        order_by = data.get('order_by')
-        if not tables:
-            tables = self._default_tables(scoped_schema)
-        return {
-            'tables': tables,
-            'filters': filters,
-            'joins': joins,
-            'time_range': time_range or dict(memory_state.get('time_range') or {}),
-            'limit': self._safe_limit(limit),
-            'order_by': str(order_by or '').strip() or None,
-            'reasoning': str(data.get('reasoning') or f'planned from question: {question}'),
-        }
-
-    def _fallback_query_plan(self, question: str, scoped_schema: dict[str, Any], memory_state: dict[str, Any], previous_query_plan: dict[str, Any] | None) -> dict[str, Any]:
-        tables = self._default_tables(scoped_schema)
-        if previous_query_plan and previous_query_plan.get('tables'):
-            tables = [str(t) for t in previous_query_plan.get('tables') if str(t).strip()] or tables
-        q = question.lower()
-        time_range = dict(memory_state.get('time_range') or {})
-        if any(word in q for word in ('yesterday', 'last night')):
-            time_range = {'preset': 'yesterday'}
-        elif 'today' in q:
-            time_range = {'preset': 'today'}
-        filters = dict(previous_query_plan.get('filters') or {}) if previous_query_plan else {}
-        joins = list(previous_query_plan.get('joins') or []) if previous_query_plan else []
-        return {
-            'tables': tables,
-            'filters': filters,
-            'joins': joins,
-            'time_range': time_range,
-            'limit': self._safe_limit(previous_query_plan.get('limit') if previous_query_plan else None),
-            'order_by': previous_query_plan.get('order_by') if previous_query_plan else None,
-            'reasoning': 'fallback query planner',
-        }
-
-    def _default_tables(self, scoped_schema: dict[str, Any]) -> list[str]:
-        tables = scoped_schema.get('tables') if isinstance(scoped_schema, dict) else None
-        if isinstance(tables, dict):
-            return [str(k) for k in tables.keys()][:4]
-        if isinstance(scoped_schema, dict):
-            return [str(k) for k in scoped_schema.keys()][:4]
-        return []
-
-    def _safe_limit(self, value: Any) -> int | None:
-        try:
-            if value in (None, '', 0, '0'):
-                return None
-            n = int(value)
-            return max(1, min(n, 10000))
-        except Exception:
-            return None
 
     async def plan(self, question: str, conversation_context: str, previous_mem_plan: dict[str, Any] | None, entity_resolutions: list[dict[str, Any]], entity_scope: dict[str, Any], resolved_objective: ObjectiveResolution, resolved_dimension: DimensionResolution, resolved_temporal: TemporalResolution, retrieval_scope: str | None=None, business_resolution: BusinessSemanticResolution | None=None) -> tuple[AnalyticalPlan, dict[str, Any]]:
         previous = load_previous_plan(previous_mem_plan)

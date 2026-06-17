@@ -1,0 +1,17 @@
+[Unit]
+Description=Assistant Enhance Service — analytics engine only (127.0.0.1:9003)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=aiserver
+Group=aiserver
+WorkingDirectory=/home/aiserver/mern-vsp/assistant_enhance_service
+EnvironmentFile=/home/aiserver/mern-vsp/assistant_enhance_service/.env
+ExecStart=/home/aiserver/mern-vsp/assistant_enhance_service/scripts/start_service.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

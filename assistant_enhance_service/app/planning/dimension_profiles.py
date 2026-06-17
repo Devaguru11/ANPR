@@ -1,0 +1,21 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class DimensionProfile:
+    name: str
+    description: str
+    examples: tuple[str, ...] = ()
+    negative_examples: tuple[str, ...] = ()
+    objectives: frozenset[str] = frozenset({'ranking', 'breakdown', 'trend', 'growth'})
+DIMENSION_PROFILES: dict[str, DimensionProfile] = {'location': DimensionProfile('location', 'Site or area grouping (not individual camera id)', examples=('highest area', 'which area', 'top location', 'most violations by area', 'busiest area', 'area with highest', 'which location', 'busiest location', 'which location is busiest', 'per area', 'by area', 'area ranking', 'rank areas', 'areas by violation'), negative_examples=('which camera', 'top camera', 'peak hour', 'by hour', 'vehicle type'), objectives=frozenset({'ranking', 'growth', 'breakdown'})), 'camera': DimensionProfile('camera', 'Camera-level grouping or ranking', examples=('top camera', 'which camera', 'most active camera', 'busiest camera', 'camera ranking', 'per camera', 'by camera', 'which camera increased', 'largest growth by camera', 'camera with most'), negative_examples=('which area', 'highest area', 'violation type', 'peak hour'), objectives=frozenset({'ranking', 'growth', 'breakdown'})), 'hour': DimensionProfile('hour', 'Hour-of-day bucket', examples=('peak hour', 'busiest hour', 'hourly peak', 'which hour', 'by hour', 'per hour', 'hourly trend', 'hour with most', 'what is the peak hour'), negative_examples=('busiest day', 'which day', 'which camera', 'which area'), objectives=frozenset({'ranking', 'trend', 'breakdown'})), 'day': DimensionProfile('day', 'Day-level bucket for ranking busiest individual days', examples=('busiest day', 'which day', 'which was the busiest day', 'day with most', 'highest day', 'top day', 'most active day', 'by day ranking'), negative_examples=('daily trend', 'over time', 'peak hour', 'by hour', 'this month'), objectives=frozenset({'ranking', 'breakdown'})), 'date': DimensionProfile('date', 'Calendar date series for trends over time', examples=('daily trend', 'trend over time', 'by date', 'per day trend', 'over the last 7 days', 'violation trend', 'day wise trend', 'daily breakdown'), negative_examples=('busiest day', 'which day had the most', 'peak hour'), objectives=frozenset({'trend', 'breakdown'})), 'violation_type': DimensionProfile('violation_type', 'Violation category grouping', examples=('worst violation type', 'top violation type', 'by violation type', 'type wise', 'by type', 'violation type breakdown', 'which violation type', 'most common violation', 'segregation by type'), negative_examples=('which camera', 'which area', 'peak hour', 'vehicle type', 'vehicle category'), objectives=frozenset({'ranking', 'breakdown'})), 'vehicle_type': DimensionProfile('vehicle_type', 'Vehicle type grouping', examples=('by vehicle type', 'vehicle type breakdown', 'which vehicle type', 'top vehicle type', 'type of vehicle', 'per vehicle type', 'vehicle type with most', 'most common vehicle type'), negative_examples=('violation type', 'which camera', 'peak hour'), objectives=frozenset({'ranking', 'breakdown'})), 'vehicle_category': DimensionProfile('vehicle_category', 'Vehicle category code grouping', examples=('by vehicle category', 'vehicle category breakdown', 'category wise'), negative_examples=('vehicle type', 'violation type'), objectives=frozenset({'ranking', 'breakdown'})), 'week': DimensionProfile('week', 'Week bucket', examples=('by week', 'weekly trend', 'per week', 'week wise'), objectives=frozenset({'trend', 'breakdown', 'ranking'})), 'month': DimensionProfile('month', 'Month bucket', examples=('by month', 'monthly trend', 'per month', 'month wise'), objectives=frozenset({'trend', 'breakdown', 'comparison'}))}
+
+def profile_names() -> list[str]:
+    return list(DIMENSION_PROFILES.keys())
+
+def resolver_prompt() -> str:
+    lines = ['Dimension catalog (return ranked dimension_candidates when grouping applies):']
+    for profile in DIMENSION_PROFILES.values():
+        ex = ', '.join(profile.examples[:4])
+        lines.append(f'- {profile.name}: {profile.description}. Examples: {ex}')
+    return '\n'.join(lines)

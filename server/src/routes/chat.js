@@ -46,10 +46,10 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "invalid", message: "sessionId is required" });
   }
 
-  const payload = { message: question, sessionId };
+  const payload = { message: question, session_id: sessionId };
 
   try {
-    const result = await forward("POST", "/assistant/chat", payload, undefined, auditUserContext(req));
+    const result = await forward("POST", "/assistant_enhance/chat", payload, undefined, auditUserContext(req));
     if (result.statusCode < 400 && result.json) {
       const legacy = toLegacyResponse(result.json, sessionId);
       if (legacy) {

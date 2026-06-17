@@ -1,6 +1,26 @@
 {
   "rows": [
     {
+      "id": 7,
+      "createdAt": "2026-06-17T06:28:34.026Z",
+      "updatedAt": "2026-06-17T06:28:34.026Z",
+      "status": "draft",
+      "sendResult": null,
+      "plate": "CCC8478",
+      "violationType": "WRONG_PARKING",
+      "amount": 1000,
+      "siteName": "Chowking",
+      "cameraId": "AEYE_5",
+      "detectedAt": "2026-06-12 18:17:02",
+      "proofUrl": "/AEYE_5/20260612/scenes/WRONG_PARKING/00000_245a3186-6648-11f1-8dc0-ae58f3195d21.jpg",
+      "paymentStatus": "unpaid",
+      "penaltyType": "first_offense",
+      "ownerEmail": "pranathi.r@bluecloudsoftech.com",
+      "ownerName": "Pranathi R",
+      "source": "auto",
+      "violationId": 7703
+    },
+    {
       "id": 6,
       "createdAt": "2026-06-03T10:34:44.944Z",
       "updatedAt": "2026-06-03T10:34:55.790Z",

@@ -1,4 +1,5 @@
-import { Avatar, Badge, Box, Button, IconButton, Typography } from "@mui/material";
+import React, { useState } from "react";
+import { Avatar, Badge, Box, Button, IconButton, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import MailOutlineOutlinedIcon from "@mui/icons-material/MailOutlineOutlined";
@@ -33,90 +34,114 @@ export function AppMasthead({ pageTitle, pageSubtitle, userEmail, onSignOut }: P
   const { rightSlot, leftSlot } = useShellHeader();
   const subtitle = pageSubtitle?.trim() || undefined;
 
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const handleProfileClick = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleProfileClose = () => {
+    setAnchorEl(null);
+  };
+
   return (
     <Box
       sx={{
         width: "100%",
         minWidth: 0,
         boxSizing: "border-box",
-        px: { xs: 2, sm: 2.5 },
+        px: { xs: 1.5, sm: 2.5 },
         py: { xs: 1, sm: 1.25 },
         minHeight: { xs: 64, sm: 72 },
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        gap: { xs: 1.5, md: 2 },
-        flexWrap: { xs: "wrap", lg: "nowrap" },
+        gap: { xs: 1, md: 2 },
+        flexWrap: "nowrap",
       }}
     >
-      {}
+      {/* Left section: Title & Subtitle */}
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
           gap: 1.25,
           minWidth: 0,
-          flex: { xs: "1 1 100%", lg: "1 1 auto" },
-          order: { xs: 1, lg: 0 },
+          flex: "1 1 auto",
           overflow: "hidden",
         }}
       >
         {leftSlot}
         <Box sx={{ minWidth: 0, overflow: "hidden" }}>
-          <Typography sx={{ ...pnpFont.pageTitle }} noWrap>
+          <Typography sx={{ ...pnpFont.pageTitle, fontSize: { xs: "1.125rem", md: "1.5rem" } }} noWrap>
             {pageTitle}
           </Typography>
           {subtitle ? (
-            <Typography sx={{ ...pnpFont.pageSubtitle, mt: 0.35 }} noWrap>
+            <Typography sx={{ ...pnpFont.pageSubtitle, mt: 0.35, fontSize: { xs: "0.75rem", md: "0.875rem" } }} noWrap>
               {subtitle}
             </Typography>
           ) : null}
         </Box>
       </Box>
 
-      {}
+      {/* Right section: Actions & Profile */}
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: { xs: 0.75, sm: 1 },
+          gap: { xs: 0.5, sm: 1 },
           flexShrink: 0,
           flexWrap: "nowrap",
-          minWidth: 0,
-          order: { xs: 2, lg: 1 },
-          flex: { xs: "1 1 100%", lg: "0 0 auto" },
-          justifyContent: { xs: "flex-start", lg: "flex-end" },
-          overflow: "hidden",
         }}
       >
-        {rightSlot}
-        <IconButton
-          size="small"
-          aria-label="Notifications"
-          sx={{ border: pnp.cardBorder, borderRadius: "8px", width: 36, height: 36, flexShrink: 0 }}
-        >
-          <Badge badgeContent={3} color="error">
-            <NotificationsNoneOutlinedIcon sx={{ fontSize: 20, color: pnp.text }} />
-          </Badge>
-        </IconButton>
-        <IconButton
-          size="small"
-          aria-label="Messages"
+        {/* Hide rightSlot (like site time/report period) on mobile to save space */}
+        <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center" }}>
+          {rightSlot}
+        </Box>
+
+        {/* Action Icons: Hide on very small screens, show on sm and up */}
+        <Box sx={{ display: { xs: "none", sm: "flex" }, gap: { xs: 0.5, sm: 1 } }}>
+          <IconButton
+            size="small"
+            aria-label="Notifications"
+            sx={{ border: pnp.cardBorder, borderRadius: "8px", width: 36, height: 36, flexShrink: 0 }}
+          >
+            <Badge badgeContent={3} color="error">
+              <NotificationsNoneOutlinedIcon sx={{ fontSize: 20, color: pnp.text }} />
+            </Badge>
+          </IconButton>
+          <IconButton
+            size="small"
+            aria-label="Messages"
+            sx={{
+              border: pnp.cardBorder,
+              borderRadius: "8px",
+              width: 36,
+              height: 36,
+              flexShrink: 0,
+            }}
+          >
+            <Badge badgeContent={2} color="error">
+              <MailOutlineOutlinedIcon sx={{ fontSize: 20, color: pnp.text }} />
+            </Badge>
+          </IconButton>
+        </Box>
+
+        {/* Profile Section */}
+        <Box
+          onClick={handleProfileClick}
           sx={{
-            border: pnp.cardBorder,
-            borderRadius: "8px",
-            width: 36,
-            height: 36,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            pl: { xs: 0, sm: 0.5 },
+            cursor: "pointer",
+            borderRadius: 1,
+            p: 0.5,
+            "&:hover": { bgcolor: "rgba(0,0,0,0.04)" },
             flexShrink: 0,
-            display: { xs: "none", sm: "inline-flex" },
+            minWidth: 0,
           }}
         >
-          <Badge badgeContent={2} color="error">
-            <MailOutlineOutlinedIcon sx={{ fontSize: 20, color: pnp.text }} />
-          </Badge>
-        </IconButton>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, pl: 0.25, flexShrink: 0, minWidth: 0 }}>
-          <Avatar sx={{ width: 38, height: 38, bgcolor: pnp.primary, fontSize: "0.8125rem", fontWeight: 700, flexShrink: 0 }}>
+          <Avatar sx={{ width: 36, height: 36, bgcolor: pnp.primary, fontSize: "0.8125rem", fontWeight: 700, flexShrink: 0 }}>
             {initialsFromEmail(userEmail)}
           </Avatar>
           <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0, maxWidth: 160 }}>
@@ -128,6 +153,7 @@ export function AppMasthead({ pageTitle, pageSubtitle, userEmail, onSignOut }: P
             </Typography>
           </Box>
         </Box>
+
         <Button
           size="small"
           variant="outlined"
@@ -142,11 +168,44 @@ export function AppMasthead({ pageTitle, pageSubtitle, userEmail, onSignOut }: P
             textTransform: "none",
             flexShrink: 0,
             display: { xs: "none", xl: "inline-flex" },
+            ml: 1,
           }}
         >
           {SITE_LABELS.signOut}
         </Button>
       </Box>
+
+      {/* Profile Menu for small screens */}
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={handleProfileClose}
+        slotProps={{
+          paper: {
+            elevation: 3,
+            sx: { mt: 1, minWidth: 180, borderRadius: 2 },
+          },
+        }}
+        transformOrigin={{ horizontal: "right", vertical: "top" }}
+        anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
+      >
+        <Box sx={{ px: 2, py: 1, display: { xs: "block", md: "none" } }}>
+          <Typography sx={{ fontWeight: 700, fontSize: "0.875rem" }}>{displayName(userEmail)}</Typography>
+          <Typography sx={{ fontSize: "0.75rem", color: "text.secondary" }}>Operations Officer</Typography>
+        </Box>
+        <MenuItem
+          onClick={() => {
+            handleProfileClose();
+            onSignOut();
+          }}
+          sx={{ color: "error.main", mt: { xs: 1, md: 0 } }}
+        >
+          <ListItemIcon>
+            <LogoutIcon fontSize="small" sx={{ color: "error.main" }} />
+          </ListItemIcon>
+          <ListItemText primary="Sign Out" primaryTypographyProps={{ fontSize: "0.875rem", fontWeight: 600 }} />
+        </MenuItem>
+      </Menu>
     </Box>
   );
 }

@@ -1,7 +1,5 @@
 from __future__ import annotations
-import json
 import re
-from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 from langgraph.graph import END, START, StateGraph
@@ -24,7 +22,6 @@ from app.planning.sql_builder import SQLBuilder
 from app.schema.discovery import SchemaCatalog
 from app.sql.validator import SQLValidator
 from app.llm.call_tracker import get_llm_calls, reset_llm_calls
-from app.engines.legacy import generate_sql_from_query_plan
 from app.workflow.state import GraphState
 from app.workflow.timing_report import build_prompt_audit, build_timing_report
 
@@ -48,47 +45,26 @@ class AnalyticsWorkflow:
     def __init__(self, services: Services) -> None:
         self.s = services
         self.unified_resolver = UnifiedSemanticResolver(services.llm, services.entities, services.concept_catalog, services.semantic_cache)
-        self.planner = AnalyticalPlanner(services.llm)
+        self.planner = AnalyticalPlanner()
         self.sql_builder = SQLBuilder()
         self._graph = self._build()
 
     def _build(self):
         g = StateGraph(GraphState)
-        g.add_node('intent_detection', self.intent_detection_node)
-        g.add_node('direct_reply', self.direct_reply_node)
-        g.add_node('content_manager', self.content_manager_node)
-        g.add_node('query_planner', self.query_planner_node)
+        g.add_node('unified_semantic_resolver', self.unified_semantic_resolver_node)
+        g.add_node('analytical_planner', self.analytical_planner)
         g.add_node('sql_generator', self.sql_generator)
         g.add_node('sql_validator', self.sql_validator)
         g.add_node('sql_executor', self.sql_executor)
-        g.add_node('insight_generator', self.insight_generator_node)
+        g.add_node('analytics_engine', self.analytics_engine)
         g.add_node('response_generator', self.response_generator)
-        g.add_node('error_response', self.error_response_node)
-        g.add_edge(START, 'intent_detection')
-        g.add_conditional_edges(
-            'intent_detection',
-            self.route_after_intent_detection,
-            {
-                'conversational': 'direct_reply',
-                'data_query': 'content_manager',
-            },
-        )
-        g.add_edge('direct_reply', END)
-        g.add_edge('content_manager', 'query_planner')
-        g.add_edge('query_planner', 'sql_generator')
+        g.add_edge(START, 'unified_semantic_resolver')
+        g.add_edge('unified_semantic_resolver', 'analytical_planner')
+        g.add_edge('analytical_planner', 'sql_generator')
         g.add_edge('sql_generator', 'sql_validator')
-        g.add_conditional_edges(
-            'sql_validator',
-            self.route_after_sql_validation,
-            {
-                'retry': 'sql_generator',
-                'execute': 'sql_executor',
-                'error': 'error_response',
-            },
-        )
-        g.add_edge('sql_executor', 'insight_generator')
-        g.add_edge('insight_generator', 'response_generator')
-        g.add_edge('error_response', END)
+        g.add_edge('sql_validator', 'sql_executor')
+        g.add_edge('sql_executor', 'analytics_engine')
+        g.add_edge('analytics_engine', 'response_generator')
         g.add_edge('response_generator', END)
         return g.compile()
 
@@ -112,263 +88,6 @@ class AnalyticsWorkflow:
             self._persist(session_id, state, error=str(exc))
             return state
 
-    def route_after_intent_detection(self, state: GraphState) -> str:
-        return 'conversational' if state.get('intent') == 'conversational' else 'data_query'
-
-    def route_after_sql_validation(self, state: GraphState) -> str:
-        if state.get('sql_validation_error'):
-            if int(state.get('retry_count') or 0) < 2:
-                return 'retry'
-            return 'error'
-        return 'execute'
-
-    async def intent_detection_node(self, state: GraphState) -> GraphState:
-        t = Timer()
-        question = re.sub(r'\s+', ' ', state['question'].strip())
-        system = (
-            'You are an intent detector for a traffic analytics assistant. '\
-            'Classify the user question as either data_query or conversational. '\
-            'Return JSON only in the format: {"intent":"data_query|conversational","reasoning":"..."}.'
-        )
-        user = f'Question: {question}\n\nReturn only JSON.'
-        intent = 'data_query'
-        reasoning = ''
-        try:
-            data = await self.s.llm.chat_json(system, user, max_tokens=128)
-            raw_intent = str(data.get('intent') or 'data_query').strip().lower()
-            intent = 'conversational' if raw_intent == 'conversational' else 'data_query'
-            reasoning = str(data.get('reasoning') or '')
-        except Exception:
-            conversational_hint = bool(re.search(r'\b(hi|hello|hey|thanks|thank you|how are you|what can you do|who are you)\b', question, re.I))
-            intent = 'conversational' if conversational_hint else 'data_query'
-            reasoning = 'fallback heuristic'
-        state['normalized_question'] = question
-        state['intent'] = intent
-        state['intent_detection_reasoning'] = reasoning
-        state['latencies']['intent_detection_ms'] = t.elapsed_ms()
-        return state
-
-    async def direct_reply_node(self, state: GraphState) -> GraphState:
-        t = Timer()
-        question = state.get('normalized_question') or re.sub(r'\s+', ' ', state['question'].strip())
-        conversation_context = self.s.memory.context_text(state['session_id'])
-        system = (
-            'You are the assistant for an ANPR operations dashboard. '\
-            'Answer conversationally and briefly. Do not mention SQL, database internals, or schema.'
-        )
-        user = f'Conversation context:\n{conversation_context[:2000]}\n\nUser question: {question}\n\nProvide a direct helpful reply.'
-        try:
-            reply = await self.s.llm.chat(system, user, max_tokens=256)
-        except Exception:
-            reply = 'How can I help you with the ANPR dashboard?'
-        state['final_answer'] = str(reply).strip() or 'How can I help you with the ANPR dashboard?'
-        state['latencies']['direct_reply_ms'] = t.elapsed_ms()
-        return state
-
-    def _schema_summary(self) -> dict[str, Any]:
-        tables: dict[str, Any] = {}
-        for (name, table) in self.s.schema.tables.items():
-            tables[name] = {
-                'columns': [c.name for c in table.columns],
-                'foreign_keys': [dict(fk) for fk in table.foreign_keys],
-            }
-        return {'tables': tables}
-
-    def _schema_text(self) -> str:
-        lines: list[str] = []
-        for name, table in self.s.schema.tables.items():
-            cols = ', '.join(c.name for c in table.columns)
-            lines.append(f'{name}: {cols}')
-        return '\n'.join(lines)
-
-    def _normalize_scoped_schema(self, data: dict[str, Any]) -> dict[str, Any]:
-        tables_in = data.get('tables') if isinstance(data, dict) else {}
-        tables: dict[str, Any] = {}
-        if isinstance(tables_in, dict):
-            for table_name, meta in tables_in.items():
-                if isinstance(meta, dict):
-                    cols = meta.get('columns') or meta.get('fields') or []
-                    reason = str(meta.get('reason') or '')
-                else:
-                    cols = meta if isinstance(meta, list) else []
-                    reason = ''
-                tables[str(table_name)] = {
-                    'columns': [str(c) for c in cols if str(c).strip()],
-                    'reason': reason,
-                }
-        relationships = data.get('relationships') if isinstance(data.get('relationships'), list) else []
-        return {'tables': tables, 'relationships': relationships}
-
-    def _scope_schema_fallback(self, question: str) -> dict[str, Any]:
-        q = question.lower()
-        tables: dict[str, Any] = {}
-        for (name, table) in self.s.schema.tables.items():
-            cols = [c.name for c in table.columns]
-            matched = [c for c in cols if c.lower() in q]
-            if matched or any(token in q for token in name.lower().split('_')):
-                tables[name] = {'columns': matched or cols[:8], 'reason': 'heuristic match'}
-        if not tables:
-            for name in list(self.s.schema.tables.keys())[:3]:
-                table = self.s.schema.tables[name]
-                tables[name] = {'columns': [c.name for c in table.columns[:8]], 'reason': 'default scope'}
-        return {'tables': tables, 'relationships': []}
-
-    async def content_manager_node(self, state: GraphState) -> GraphState:
-        t = Timer()
-        question = state.get('normalized_question') or re.sub(r'\s+', ' ', state['question'].strip())
-        system = (
-            'You are a content manager for an ANPR data assistant. '\
-            'Given the user question and the full database schema, select only the relevant tables and columns. '\
-            'Return JSON only in the format: {"tables": {"table_name": {"columns": ["col1", "col2"], "reason": "..."}}, "relationships": []}.'
-        )
-        user = f'Question: {question}\n\nFull schema:\n{self._schema_text()}\n\nReturn only relevant tables and columns.'
-        scoped_schema = None
-        try:
-            data = await self.s.llm.chat_json(system, user, max_tokens=768)
-            if isinstance(data, dict):
-                scoped_schema = self._normalize_scoped_schema(data)
-        except Exception:
-            scoped_schema = None
-        state['scoped_schema'] = scoped_schema or self._scope_schema_fallback(question)
-        state['latencies']['content_manager_ms'] = t.elapsed_ms()
-        return state
-
-    async def query_planner_node(self, state: GraphState) -> GraphState:
-        t = Timer()
-        question = state.get('normalized_question') or re.sub(r'\s+', ' ', state['question'].strip())
-        conversation_context = self.s.memory.context_text(state['session_id'])
-        memory_state = self.s.memory.load(state['session_id'])
-        previous_plan = memory_state.get('query_plan') or memory_state.get('plan') or {}
-        query_plan = await self.planner.build_query_plan(question, state.get('scoped_schema') or {}, conversation_context, memory_state, previous_plan)
-        state['query_plan'] = query_plan
-        state['plan'] = query_plan
-        state['conversation_context'] = conversation_context
-        state['latencies']['query_planner_ms'] = t.elapsed_ms()
-        return state
-
-    async def sql_generator(self, state: GraphState) -> GraphState:
-        t = Timer()
-        if state.get('sql_validation_error'):
-            state['sql_correction_message'] = state.get('sql_validation_error')
-        question = state.get('normalized_question') or re.sub(r'\s+', ' ', state['question'].strip())
-        sql = await generate_sql_from_query_plan(
-            self.s.llm,
-            question,
-            state.get('query_plan') or {},
-            state.get('scoped_schema') or {},
-            state.get('sql_correction_message'),
-        )
-        state['sql'] = sql
-        state['latencies']['sql_gen_ms'] = t.elapsed_ms()
-        return state
-
-    async def sql_validator(self, state: GraphState) -> GraphState:
-        t = Timer()
-        sql = StringOrEmpty(state.get('sql')).strip() if False else str(state.get('sql') or '').strip()
-        if not sql:
-            state['sql_validation_error'] = 'Empty SQL'
-            state['retry_count'] = int(state.get('retry_count') or 0) + 1
-            state['latencies']['validate_ms'] = t.elapsed_ms()
-            return state
-        try:
-            self.s.db.query_all(f'EXPLAIN {sql}')
-            state['sql_validation_error'] = ''
-        except Exception as exc:
-            state['sql_validation_error'] = str(exc)
-            state['retry_count'] = int(state.get('retry_count') or 0) + 1
-            state['sql_correction_message'] = str(exc)
-        state['latencies']['validate_ms'] = t.elapsed_ms()
-        return state
-
-    async def sql_executor(self, state: GraphState) -> GraphState:
-        t = Timer()
-        sql = str(state.get('sql') or '').strip()
-        if not sql:
-            state['error'] = 'No SQL generated.'
-            state['columns'] = []
-            state['rows'] = []
-            state['row_count'] = 0
-            state['latencies']['sql_ms'] = t.elapsed_ms()
-            return state
-        try:
-            (cols, rows) = self.s.db.execute(sql)
-            state['columns'] = cols
-            state['rows'] = rows
-            state['row_count'] = len(rows)
-        except Exception as exc:
-            state['error'] = f'SQL execution failed: {exc}'
-            state['columns'] = []
-            state['rows'] = []
-            state['row_count'] = 0
-        state['latencies']['sql_ms'] = t.elapsed_ms()
-        return state
-
-    def _relax_query_plan(self, query_plan: dict[str, Any]) -> dict[str, Any]:
-        relaxed = json.loads(json.dumps(query_plan or {}))
-        filters = relaxed.get('filters') if isinstance(relaxed.get('filters'), dict) else {}
-        for key in ('vehicle_num', 'plate_suffix', 'camera_id', 'violation_type'):
-            if key in filters:
-                filters.pop(key, None)
-                break
-        time_range = relaxed.get('time_range') if isinstance(relaxed.get('time_range'), dict) else {}
-        if time_range.get('preset') in ('today', 'yesterday'):
-            relaxed['time_range'] = {'preset': 'last_7_days'}
-        else:
-            relaxed['time_range'] = time_range or {'preset': 'last_7_days'}
-        relaxed['filters'] = filters
-        return relaxed
-
-    async def insight_generator_node(self, state: GraphState) -> GraphState:
-        t = Timer()
-        row_count = int(state.get('row_count') or 0)
-        if row_count == 0 and not state.get('relaxation_attempted'):
-            state['relaxation_attempted'] = True
-            state['query_plan'] = self._relax_query_plan(state.get('query_plan') or {})
-            state['plan'] = state['query_plan']
-            state['sql_correction_message'] = 'No rows returned. Relax the WHERE clause and broaden the time range.'
-            state = await self.sql_generator(state)
-            state = await self.sql_validator(state)
-            if not state.get('sql_validation_error'):
-                state = await self.sql_executor(state)
-                row_count = int(state.get('row_count') or 0)
-        if row_count == 0:
-            state['final_answer'] = 'No matching data was found after relaxing the filters once.'
-            state['latencies']['insight_ms'] = t.elapsed_ms()
-            return state
-        rows = state.get('rows') or []
-        if row_count >= 10000:
-            limited_sql = f"SELECT * FROM ({str(state.get('sql') or '').rstrip(';')}) AS limited_query LIMIT 500"
-            try:
-                (cols, limited_rows) = self.s.db.execute(limited_sql)
-                state['columns'] = cols
-                state['rows'] = limited_rows
-                state['row_count'] = len(limited_rows)
-                state['truncated'] = True
-                rows = limited_rows
-            except Exception:
-                state['truncated'] = True
-        question = state.get('normalized_question') or state.get('question', '')
-        system = (
-            'You are a data assistant for an ANPR platform. '\
-            'Use the provided rows and the user question to write a concise natural-language answer. '\
-            'Focus on key observations, not raw rows.'
-        )
-        sample_rows = rows[:50]
-        user = f'User question: {question}\n\nColumns: {json.dumps(state.get("columns") or [], default=str)}\n\nRows sample: {json.dumps(sample_rows, default=str)}\n\nWrite a concise answer with key observations.'
-        try:
-            answer = await self.s.llm.chat(system, user, max_tokens=512)
-            state['final_answer'] = str(answer).strip() or 'No data was returned for this query.'
-        except Exception:
-            state['final_answer'] = f'Returned {state.get("row_count", 0)} rows.' + (' Results were truncated.' if state.get('truncated') else '')
-        if state.get('truncated'):
-            state['final_answer'] = f"{state['final_answer']} Results were truncated to 500 rows for summarization."
-        state['latencies']['insight_ms'] = t.elapsed_ms()
-        return state
-
-    async def error_response_node(self, state: GraphState) -> GraphState:
-        state['final_answer'] = state.get('sql_validation_error') or state.get('error') or 'I could not complete that request.'
-        return state
-
     def _finalize_observability(self, state: GraphState) -> None:
         state['timing_report'] = build_timing_report(state.get('latencies', {}), state.get('semantic_timing'))
         state['prompt_audit'] = build_prompt_audit(state.get('prompt_metrics'))
@@ -378,7 +97,7 @@ class AnalyticsWorkflow:
         state['debug'] = dbg
 
     def _persist(self, session_id: str, state: GraphState, error: str | None=None) -> None:
-        plan = state.get('query_plan') or state.get('plan') or {}
+        plan = state.get('plan') or {}
         self.s.memory.add_exchange(session_id, 'user', state.get('normalized_question') or state.get('question', ''))
         if state.get('final_answer'):
             self.s.memory.add_exchange(session_id, 'assistant', state['final_answer'])
@@ -514,23 +233,26 @@ class AnalyticsWorkflow:
 
     async def response_generator(self, state: GraphState) -> GraphState:
         t = Timer()
-        if not state.get('final_answer'):
-            state['final_answer'] = 'I could not complete that request.'
+        if state.get('clarification_needed'):
+            state['latencies']['response_ms'] = t.elapsed_ms()
+            return state
+        if state.get('error') and (not state.get('rows')):
+            state['final_answer'] = f"I could not retrieve analytics data. {state['error']}"
+        else:
+            ao = state.get('analytics_output') or {}
+            answer = ao.get('composed_answer') or ao.get('summary')
+            state['final_answer'] = answer if answer else 'No data was returned for this query.'
+        plan = state.get('plan', {})
+        ap = plan.get('analytical_plan', {})
+        sem_res = state.get('semantic_resolution') or plan.get('semantic_resolution') or {}
+        obj_res = state.get('objective_resolution') or plan.get('objective_resolution') or {}
+        state['debug_context'] = {'intent': ap.get('intent'), 'user_objective': ap.get('user_objective'), 'semantic_resolution': sem_res, 'business_semantic_resolution': state.get('business_semantic_resolution') or plan.get('business_semantic_resolution'), 'objective_resolution': obj_res, 'dimension_resolution': state.get('dimension_resolution') or plan.get('dimension_resolution'), 'temporal_resolution': state.get('temporal_resolution') or plan.get('temporal_resolution'), 'conversation_state': state.get('conversation_state') or plan.get('conversation_state'), 'objective_transform': plan.get('objective_transform'), 'metric': ap.get('metric'), 'dimensions': ap.get('dimensions'), 'filters': ap.get('filters'), 'group_by': ap.get('group_by'), 'query_mode': ap.get('query_mode'), 'entity_scope': ap.get('entity_scope'), 'time_range': ap.get('time_range'), 'retrieval_scope': sem_res.get('retrieval_scope') or ap.get('retrieval_scope'), 'sql': state.get('sql'), 'dataset_type': state.get('analytics_output', {}).get('dataset_type'), 'analytics_summary': state.get('analytics_output', {}).get('summary'), 'active_scope': state.get('active_scope'), 'inherited_scope': state.get('inherited_scope'), 'query_modifications': state.get('query_modifications'), 'resolved_context': state.get('resolved_context'), 'confidence': state.get('confidence'), 'analytics_output': state.get('analytics_output'), 'entity_resolution': state.get('entity_resolution'), 'latencies': state.get('latencies'), 'semantic_timing': state.get('semantic_timing'), 'prompt_metrics': state.get('prompt_metrics'), 'prompt_audit': state.get('prompt_audit'), 'timing_report': state.get('timing_report'), 'llm_calls': state.get('llm_calls')}
         state['llm_calls'] = get_llm_calls()
         state['timing_report'] = build_timing_report(state.get('latencies', {}), state.get('semantic_timing'))
         state['prompt_audit'] = build_prompt_audit(state.get('prompt_metrics'))
-        state['debug_context'] = {
-            'intent': state.get('intent'),
-            'question': state.get('question'),
-            'scoped_schema': state.get('scoped_schema'),
-            'query_plan': state.get('query_plan'),
-            'sql': state.get('sql'),
-            'row_count': state.get('row_count'),
-            'sql_validation_error': state.get('sql_validation_error'),
-            'retry_count': state.get('retry_count'),
-            'latencies': state.get('latencies'),
-            'llm_calls': state.get('llm_calls'),
-        }
+        state['debug_context']['llm_calls'] = state['llm_calls']
+        state['debug_context']['timing_report'] = state['timing_report']
+        state['debug_context']['prompt_audit'] = state['prompt_audit']
         state['debug'] = state['debug_context']
         state['latencies']['response_ms'] = t.elapsed_ms()
         return state
