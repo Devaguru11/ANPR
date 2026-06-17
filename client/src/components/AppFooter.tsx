@@ -4,7 +4,7 @@ import HttpsOutlinedIcon from "@mui/icons-material/HttpsOutlined";
 import VerifiedOutlinedIcon from "@mui/icons-material/VerifiedOutlined";
 import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
 import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
-import { PoweredByBcss } from "./PoweredByBcss";
+import { PoweredByAccessGenie } from "./PoweredByAccessGenie";
 import { pnp } from "../lib/pnpTheme";
 
 const BADGES = [
@@ -78,7 +78,7 @@ export function AppFooter() {
         ))}
       </Stack>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <PoweredByBcss variant="footerCompact" />
+        <PoweredByAccessGenie variant="footerCompact" />
       </Box>
     </Box>
   );
