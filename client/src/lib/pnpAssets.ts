@@ -6,4 +6,4 @@ export const PNP_BADGE_SRC = `${base}PnpBadge.png`;
 
 export const LEGACY_LOGO_SRC = `${base}Logo.png`;
 
-export const BCSS_LOGO_SRC = `${base}BcssLogo.png`;
+export const ACCESS_GENIE_LOGO_SRC = `${base}AccessGenieLogo.svg`;

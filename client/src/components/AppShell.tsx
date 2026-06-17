@@ -27,7 +27,7 @@ import RouteOutlinedIcon from "@mui/icons-material/RouteOutlined";
 import ManageAccountsOutlinedIcon from "@mui/icons-material/ManageAccountsOutlined";
 
 import MenuIcon from "@mui/icons-material/Menu";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ShellHeaderProvider, useShellHeader } from "../context/ShellHeaderContext";
 import { AppMasthead } from "./AppMasthead";
@@ -182,6 +182,11 @@ function AppShellInner() {
     bgcolor: pnpSidebarBg,
     overflowX: "hidden" as const,
     overflowY: "auto" as const,
+    scrollbarWidth: "none" as const,
+    msOverflowStyle: "none" as const,
+    "&::-webkit-scrollbar": {
+      display: "none",
+    },
     transition: theme.transitions.create("width", {
       easing: theme.transitions.easing.sharp,
       duration: theme.transitions.duration.enteringScreen,
@@ -223,21 +228,23 @@ function AppShellInner() {
         {nav.map((n) => {
           const selected = isNavActive(n.path, loc.pathname);
           const disabled = n.path == null;
+          
+          // Use any cast to satisfy MUI's polymorphic component props which can be strict
+          const linkProps: any = !disabled && n.path
+            ? { 
+                component: Link, 
+                to: n.path,
+                ...(n.openInNewTab ? { target: "_blank", rel: "noopener noreferrer" } : {})
+              }
+            : { component: "div" };
+
           const item = (
             <ListItemButton
               key={n.label}
+              {...linkProps}
               selected={selected}
               disabled={disabled}
               aria-current={selected ? "page" : undefined}
-              onClick={() => {
-                if (!n.path) return;
-                if (n.openInNewTab) {
-                  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-                  window.open(`${window.location.origin}${base}${n.path}`, "_blank", "noopener,noreferrer");
-                  return;
-                }
-                navigate(n.path);
-              }}
               sx={{
                 ...navItemSx(selected, sidebarExpanded),
                 ...(disabled
