@@ -400,7 +400,7 @@ function AppShellInner() {
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          bgcolor: pnp.pageBg,
+          bgcolor: loc.pathname === "/assistant" || loc.pathname.startsWith("/assistant_enhance") ? "#0B1220" : pnp.pageBg,
           width: isMobile ? "100%" : `calc(100% - ${drawerWidth}px)`,
           transition: theme.transitions.create(["width", "margin"], {
             easing: theme.transitions.easing.sharp,
@@ -419,7 +419,7 @@ function AppShellInner() {
             overflowX: "hidden",
             pt: ui.mastheadContentGap,
             px: { xs: 2, md: 2.5 },
-            pb: loc.pathname === "/assistant" || loc.pathname.startsWith("/assistant_enhance") ? 0 : { xs: 2, md: 2.5 },
+            pb: loc.pathname.startsWith("/assistant_enhance") ? 0 : { xs: 2, md: 2.5 },
           }}
         >
           <Box
@@ -435,7 +435,7 @@ function AppShellInner() {
             }}
           >
             <Box sx={{ flex: 1, minWidth: 0 }}><Outlet /></Box>
-            {loc.pathname === "/assistant" || loc.pathname.startsWith("/assistant_enhance") ? null : <AppFooter />}
+            {loc.pathname.startsWith("/assistant_enhance") ? null : <AppFooter />}
           </Box>
         </Box>
       </Box>

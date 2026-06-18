@@ -84,8 +84,6 @@ export function AssistantEnhanceDebugPage() {
     <Box
       sx={{
         flex: 1,
-        mx: { xs: -2, md: -2.5 },
-        mt: { xs: -2, md: -2.5 },
         p: { xs: 2, md: 2.5 },
         minHeight: 0,
         overflowY: "auto",

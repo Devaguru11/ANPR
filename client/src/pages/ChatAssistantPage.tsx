@@ -144,8 +144,6 @@ export function ChatAssistantPage() {
         flex: 1,
         display: "flex",
         flexDirection: "column",
-        mx: { xs: -2, md: -2.5 },
-        mt: { xs: -2, md: -2.5 },
         minHeight: 0,
         height: "100%",
         borderRadius: { md: `${ui.cardRadius}px` },

@@ -4,6 +4,7 @@ import HttpsOutlinedIcon from "@mui/icons-material/HttpsOutlined";
 import VerifiedOutlinedIcon from "@mui/icons-material/VerifiedOutlined";
 import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
 import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
+import { useLocation } from "react-router-dom";
 import { PoweredByAccessGenie } from "./PoweredByAccessGenie";
 import { pnp } from "../lib/pnpTheme";
 
@@ -16,6 +17,9 @@ const BADGES = [
 ];
 
 export function AppFooter() {
+  const loc = useLocation();
+  const isDarkPage = loc.pathname === "/assistant" || loc.pathname.startsWith("/assistant_enhance");
+
   return (
     <Box
       component="footer"
@@ -27,7 +31,7 @@ export function AppFooter() {
         boxSizing: "border-box",
         px: { xs: 2, md: 2.5 },
         py: { xs: 0.5, md: 0.65 },
-        bgcolor: pnp.footerBg,
+        bgcolor: isDarkPage ? "#0B1220" : pnp.footerBg,
         borderTop: "1px solid rgba(148, 163, 184, 0.12)",
         display: "flex",
         alignItems: "center",
