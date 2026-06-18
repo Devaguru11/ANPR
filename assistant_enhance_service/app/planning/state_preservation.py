@@ -82,6 +82,12 @@ def explicit_filter_change(question: str, filter_key: str, proposed_val: Any, pr
 
 def preserve_sticky_scope(previous: AnalyticalPlan | None, proposed: AnalyticalPlan, *, question: str, inherit: bool) -> tuple[AnalyticalPlan, dict[str, Any]]:
     audit: dict[str, Any] = {'state_before_merge': sticky_snapshot(previous), 'resolved_changes': [], 'sticky_preserved': [], 'sticky_overridden': []}
+    if proposed.user_objective == 'summary':
+        proposed.filters = {}
+        proposed.entity_scope = {}
+        audit['resolved_changes'].append('summary_reset')
+        audit['state_after_merge'] = sticky_snapshot(proposed)
+        return (proposed, audit)
     if not inherit or previous is None:
         audit['resolved_changes'].append('new_scope')
         audit['state_after_merge'] = sticky_snapshot(proposed)
