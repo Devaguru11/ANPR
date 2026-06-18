@@ -65,7 +65,13 @@ class TemporalResolver:
             return TemporalResolution(time_range=dict(active_tr), confidence=0.4, inherited=True, reasoning='fallback: inherited active time_range', resolution_tier=tier)
 
     def _parse(self, data: dict[str, Any], *, tier: str) -> TemporalResolution:
-        tr = dict(data.get('time_range') or {'preset': 'last_30_days'})
+        tr_raw = data.get('time_range')
+        if isinstance(tr_raw, dict):
+            tr = dict(tr_raw)
+        elif isinstance(tr_raw, str):
+            tr = {'preset': tr_raw}
+        else:
+            tr = {'preset': 'last_30_days'}
         conf = float(data.get('confidence', 0.7))
         conf = max(0.0, min(1.0, conf))
         return TemporalResolution(time_range=tr, confidence=conf, inherited=bool(data.get('inherited', False)), reasoning=str(data.get('reasoning', '')), resolution_tier=tier)

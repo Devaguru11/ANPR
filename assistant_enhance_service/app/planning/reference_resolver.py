@@ -38,7 +38,8 @@ class ReferenceResolver:
             return ReferenceResolution(confidence=0.3, reasoning='reference resolver fallback: no resolution', resolution_tier='fallback')
 
     def _parse(self, data: dict[str, Any]) -> ReferenceResolution:
-        ref = dict(data.get('resolved_reference') or {})
+        ref_raw = data.get('resolved_reference')
+        ref = dict(ref_raw) if isinstance(ref_raw, dict) else {}
         ref = {k: v for (k, v) in ref.items() if v is not None and v != ''}
         conf = float(data.get('confidence', 0.5))
         conf = max(0.0, min(1.0, conf))
