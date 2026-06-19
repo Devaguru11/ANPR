@@ -54,7 +54,7 @@ def _column_affinity(concept_id: str, context: str) -> float:
             score += 0.02
     return min(score, 0.08)
 
-def extract_candidates(data: dict, prior_concept: str | None) -> list[tuple[str, float]]:
+def extract_candidates(data: dict, prior_concept: str | None, question: str = "") -> list[tuple[str, float]]:
     out: list[tuple[str, float]] = []
     seen: set[str] = set()
     raw_candidates = data.get('business_candidates') or []
@@ -79,12 +79,32 @@ def extract_candidates(data: dict, prior_concept: str | None) -> list[tuple[str,
         if cid in concept_names() and cid not in seen:
             out.append((cid, 0.65))
             seen.add(cid)
+
+    # Keyword-based heuristic candidate injection
+    if question:
+        q = question.lower()
+        keyword_map = {
+            'violations': ['violation', 'violat', 'offence', 'offense', 'infraction'],
+            'vehicle_detections': ['detection', 'sighting', 'capture', 'traffic'],
+            'vehicles': ['vehicle', 'car', 'motorcycle', 'truck', 'bus'],
+            'plate_reads': ['plate', 'read', 'identif'],
+            'challans': ['challan', 'ticket', 'penalty', 'fine'],
+            'camera_activity': ['camera', 'site', 'busiest', 'busy'],
+            'watchlist_hits': ['watchlist'],
+            'unique_violating_vehicles': ['unique car', 'unique vehicle', 'distinct violating', 'unique violating']
+        }
+        for concept_id, keywords in keyword_map.items():
+            if any(kw in q for kw in keywords):
+                if concept_id in concept_names() and concept_id not in seen:
+                    out.append((concept_id, 0.72))
+                    seen.add(concept_id)
+
     if prior_concept and prior_concept in concept_names() and (prior_concept not in seen):
         out.append((prior_concept, 0.55))
     if not out:
         fallback = prior_concept or default_concept()
         out.append((fallback, 0.4))
-    return out[:5]
+    return out[:6]
 
 def score_candidates(question: str, candidates: list[tuple[str, float]], *, prior_concept: str | None, prior_metric: str | None, inherit: bool, conversation_context: str, llm_confidence: float) -> ConceptSelection:
     q_tokens = _tokens(question)
@@ -105,6 +125,12 @@ def score_candidates(question: str, candidates: list[tuple[str, float]], *, prio
         components['schema_context'] = _column_affinity(cid, ctx)
         if idx == 0:
             components['llm_global_confidence'] = llm_confidence * 0.08
+        if cid == 'unique_violating_vehicles':
+            q_lower = question.lower()
+            has_unique = any(u in q_lower for u in ('unique', 'distinct'))
+            has_violation_context = any(v in q_lower for v in ('violat', 'offenc', 'offens', 'infraction', 'those', 'helmet', 'speeding', 'parking', 'route', 'riding', 'seatbelt'))
+            if has_unique and has_violation_context:
+                components['unique_violators_heuristic'] = 0.45
         total = sum(components.values())
         details.append(ConceptScoreDetail(concept=cid, score=round(total, 4), components=components))
     details.sort(key=lambda d: (-d.score, d.concept))

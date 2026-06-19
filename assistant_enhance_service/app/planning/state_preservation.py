@@ -11,10 +11,19 @@ TRANSFORMABLE_PLAN_KEYS = frozenset({'user_objective', 'query_mode', 'dimensions
 VIOLATION_CUES: tuple[tuple[str, str], ...] = (('no helmet', 'NO_HELMET'), ('no-helmet', 'NO_HELMET'), ('no_helmet', 'NO_HELMET'), ('triple riding', 'TRIPLE_RIDING'), ('triple-riding', 'TRIPLE_RIDING'), ('wrong route', 'WRONG_ROUTE'), ('wrong-route', 'WRONG_ROUTE'), ('wrong parking', 'WRONG_PARKING'), ('wrong-parking', 'WRONG_PARKING'))
 LOCATION_CUES = ('chowking', 'luvers', 'baliwag', 'highway', 'market', 'at ')
 
+def ensure_dict_time_range(val: Any) -> dict[str, Any]:
+    if not val:
+        return {}
+    if isinstance(val, dict):
+        return dict(val)
+    if isinstance(val, str):
+        return {'preset': val}
+    return {}
+
 def sticky_snapshot(plan: AnalyticalPlan | None) -> dict[str, Any]:
     if plan is None:
         return {}
-    return {'metric': plan.metric, 'time_range': dict(plan.time_range or {}), 'filters': dict(plan.filters or {}), 'entity_scope': dict(plan.entity_scope or {})}
+    return {'metric': plan.metric, 'time_range': ensure_dict_time_range(plan.time_range), 'filters': dict(plan.filters or {}), 'entity_scope': dict(plan.entity_scope or {})}
 
 def question_mentions_time(question: str) -> bool:
     return TemporalResolver._question_mentions_time(question)
@@ -38,27 +47,30 @@ def question_mentions_vehicle_type(question: str) -> bool:
     return any((w in q for w in ('motorcycle', 'car', 'truck', 'bus', 'bicycle', 'two-wheeler', 'two wheeler')))
 
 def time_range_equal(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
-    return dict(a or {}) == dict(b or {})
+    return ensure_dict_time_range(a) == ensure_dict_time_range(b)
 
 def explicit_time_change(question: str, proposed: dict[str, Any], previous: dict[str, Any] | None) -> bool:
     from app.planning.temporal_override import question_has_explicit_time
+    proposed_tr = ensure_dict_time_range(proposed)
+    previous_tr = ensure_dict_time_range(previous)
     if question_has_explicit_time(question):
         return True
-    if not previous:
-        return bool(proposed)
+    if not previous_tr:
+        return bool(proposed_tr)
     return False
 
 def explicit_metric_change(question: str, proposed_metric: str, previous_metric: str | None, proposed_filters: dict[str, Any]) -> bool:
+    q = question.lower()
     if proposed_metric != previous_metric and previous_metric:
         if question_mentions_plate_pattern(question) or proposed_filters.get('plate_suffix'):
             return True
-        if question_mentions_violation_type(question):
+        if question_mentions_violation_type(question) or 'violation' in q or 'detect' in q or question_mentions_vehicle_type(question):
             return True
     if not previous_metric:
         return True
     if proposed_filters.get('plate_suffix') and question_mentions_plate_pattern(question):
         return True
-    return proposed_metric != previous_metric and (question_mentions_plate_pattern(question) or 'plate' in question.lower() or 'vehicle' in question.lower() or ('detection' in question.lower()))
+    return proposed_metric != previous_metric and (question_mentions_plate_pattern(question) or 'plate' in q or 'vehicle' in q or 'detect' in q or 'violation' in q or question_mentions_vehicle_type(question))
 
 def explicit_filter_change(question: str, filter_key: str, proposed_val: Any, previous_val: Any) -> bool:
     if proposed_val is None:
@@ -138,16 +150,16 @@ def preserve_sticky_scope(previous: AnalyticalPlan | None, proposed: AnalyticalP
     else:
         audit['sticky_preserved'].append('metric')
     if explicit_time_change(question, proposed.time_range, previous.time_range):
-        merged.time_range = dict(proposed.time_range)
+        merged.time_range = ensure_dict_time_range(proposed.time_range)
         changes.append('time_range_updated')
         audit['sticky_overridden'].append('time_range')
-        audit['previous_time_range'] = dict(previous.time_range)
-        audit['new_time_range'] = dict(proposed.time_range)
+        audit['previous_time_range'] = ensure_dict_time_range(previous.time_range)
+        audit['new_time_range'] = ensure_dict_time_range(proposed.time_range)
         audit['override_applied'] = True
     else:
         audit['sticky_preserved'].append('time_range')
-        audit['previous_time_range'] = dict(previous.time_range)
-        audit['new_time_range'] = dict(previous.time_range)
+        audit['previous_time_range'] = ensure_dict_time_range(previous.time_range)
+        audit['new_time_range'] = ensure_dict_time_range(previous.time_range)
         audit['override_applied'] = False
     for key in STICKY_FILTER_KEYS:
         proposed_val = proposed.filters.get(key)

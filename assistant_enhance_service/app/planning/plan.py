@@ -25,4 +25,11 @@ class AnalyticalPlan:
     def from_dict(cls, data: dict[str, Any] | None) -> AnalyticalPlan:
         if not data:
             return cls()
-        return cls(intent=str(data.get('intent', 'analyze')), user_objective=str(data.get('user_objective', 'metric_summary')), metric=str(data.get('metric', 'violations')), dimensions=list(data.get('dimensions') or []), filters=dict(data.get('filters') or {}), group_by=list(data.get('group_by') or []), time_range=dict(data.get('time_range') or {'preset': 'last_30_days'}), sort=dict(data.get('sort') or {}), limit=data.get('limit'), retrieval_scope=str(data.get('retrieval_scope') or 'default'), query_mode=str(data.get('query_mode', 'count')), compare_to=data.get('compare_to'), entity_scope=dict(data.get('entity_scope') or {}))
+        tr_raw = data.get('time_range')
+        if isinstance(tr_raw, dict):
+            tr = dict(tr_raw)
+        elif isinstance(tr_raw, str):
+            tr = {'preset': tr_raw}
+        else:
+            tr = {'preset': 'last_30_days'}
+        return cls(intent=str(data.get('intent', 'analyze')), user_objective=str(data.get('user_objective', 'metric_summary')), metric=str(data.get('metric', 'violations')), dimensions=list(data.get('dimensions') or []), filters=dict(data.get('filters') or {}), group_by=list(data.get('group_by') or []), time_range=tr, sort=dict(data.get('sort') or {}), limit=data.get('limit'), retrieval_scope=str(data.get('retrieval_scope') or 'default'), query_mode=str(data.get('query_mode', 'count')), compare_to=data.get('compare_to'), entity_scope=dict(data.get('entity_scope') or {}))

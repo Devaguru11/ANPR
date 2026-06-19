@@ -44,7 +44,10 @@ class EntityDiscovery:
                 return [self._clean(r[0]) for r in rows if r[0]]
             except Exception:
                 return fallback
-        self.cache = EntityCache(camera_ids=ids, camera_names=names, violation_types=distinct('SELECT DISTINCT violation_type FROM traffic_violations WHERE violation_type IS NOT NULL LIMIT 100', ['WRONG_ROUTE', 'NO_HELMET', 'TRIPLE_RIDING', 'WRONG_PARKING']), vehicle_types=distinct('SELECT DISTINCT vehicle_type FROM vehicle_events WHERE vehicle_type IS NOT NULL LIMIT 100', []), vehicle_categories=distinct('SELECT DISTINCT vehicle_category FROM vehicle_events WHERE vehicle_category IS NOT NULL LIMIT 100', []), sites=list(set(names.values())), last_refresh=time.time())
+        db_violations = distinct('SELECT DISTINCT violation_type FROM traffic_violations WHERE violation_type IS NOT NULL LIMIT 100', [])
+        static_violations = ['WRONG_ROUTE', 'NO_HELMET', 'TRIPLE_RIDING', 'WRONG_PARKING', 'SPEEDING', 'NO_SEATBELT', 'NO_PLATE', 'OVERLOADING']
+        v_types = list(dict.fromkeys(db_violations + static_violations))
+        self.cache = EntityCache(camera_ids=ids, camera_names=names, violation_types=v_types, vehicle_types=distinct('SELECT DISTINCT vehicle_type FROM vehicle_events WHERE vehicle_type IS NOT NULL LIMIT 100', []), vehicle_categories=distinct('SELECT DISTINCT vehicle_category FROM vehicle_events WHERE vehicle_category IS NOT NULL LIMIT 100', []), sites=list(set(names.values())), last_refresh=time.time())
 
     def _discover_camera_labels(self) -> dict[str, str]:
         labels: dict[str, str] = {}

@@ -39,7 +39,7 @@ def infer_transformation_objective(prior_objective: str | None, question: str, r
         breakdown_cues = ('segregation', 'breakdown', 'type wise', 'by type', 'distribution', 'split', 'categor', 'break these', 'break down')
         if any((cue in q for cue in breakdown_cues)) and is_valid_transition(prior_objective, 'breakdown'):
             return 'breakdown'
-        ranking_cues = ('most', 'highest', 'top ', 'which camera', 'which area', 'peak hour', 'busiest')
+        ranking_cues = ('most', 'highest', 'top ', 'which camera', 'which area', 'peak hour', 'busiest', 'rank', 'ranking', 'order')
         if any((cue in q for cue in ranking_cues)) and is_valid_transition(prior_objective, 'ranking'):
             return 'ranking'
         trend_cues = ('trend', 'over time', 'daily', 'over the last')

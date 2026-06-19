@@ -102,23 +102,48 @@ class TemporalResolver:
     @staticmethod
     def _resolve_partial_date(question: str, reporting: dict[str, Any]) -> dict[str, Any] | None:
         q = question.lower()
-        match = re.search('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\b', q)
-        if not match:
+        found_dates = []
+
+        # Pattern 1: Day Month (e.g., "14 June", "14th June")
+        for m in re.finditer('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\b', q):
+            day = int(m.group(1))
+            month_key = m.group(2)
+            found_dates.append((m.start(), day, month_key))
+
+        # Pattern 2: Month Day (e.g., "June 14th", "June 14")
+        for m in re.finditer('\\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b', q):
+            month_key = m.group(1)
+            day = int(m.group(2))
+            found_dates.append((m.start(), day, month_key))
+
+        if not found_dates:
             return None
-        day = int(match.group(1))
-        month_key = match.group(2)
-        month = MONTH_ALIASES.get(month_key) or MONTH_ALIASES.get(month_key[:3])
-        if not month:
+
+        found_dates.sort(key=lambda x: x[0])
+
+        def parse_single_match(day: int, month_key: str) -> str | None:
+            month = MONTH_ALIASES.get(month_key) or MONTH_ALIASES.get(month_key[:3])
+            if not month:
+                return None
+            year = reporting.get('conversation_year')
+            if year is None:
+                ref = reporting.get('reference_date')
+                year = int(str(ref)[:4]) if ref else datetime.utcnow().year
+            try:
+                resolved = datetime(int(year), month, day)
+                return resolved.strftime('%Y-%m-%d')
+            except ValueError:
+                return None
+
+        if len(found_dates) >= 2:
+            start_str = parse_single_match(found_dates[0][1], found_dates[0][2])
+            end_str = parse_single_match(found_dates[1][1], found_dates[1][2])
+            if start_str and end_str:
+                return {'preset': 'specific_date', 'start': start_str, 'end': end_str}
+
+        day_str = parse_single_match(found_dates[0][1], found_dates[0][2])
+        if not day_str:
             return None
-        year = reporting.get('conversation_year')
-        if year is None:
-            ref = reporting.get('reference_date')
-            year = int(str(ref)[:4]) if ref else datetime.utcnow().year
-        try:
-            resolved = datetime(int(year), month, day)
-        except ValueError:
-            return None
-        day_str = resolved.strftime('%Y-%m-%d')
         return {'preset': 'specific_date', 'start': day_str, 'end': day_str}
 
     @staticmethod

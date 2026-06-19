@@ -12,15 +12,20 @@ def question_references_peak_hour(question: str) -> bool:
     return bool(re.search('\\b(?:that|the)\\s+hour\\b|\\bduring\\s+(?:that|the)\\s+hour\\b|\\bat\\s+that\\s+hour\\b|\\bpeak\\s+hour\\b', q))
 
 def should_inherit(question: str, context: str, previous: AnalyticalPlan) -> bool:
-    tokens = question.lower().split()
-    if len(tokens) <= 8:
+    q = question.lower()
+    tokens = q.split()
+    if not tokens:
+        return False
+    refs = ('these', 'those', 'them', 'that', 'this', 'same', 'previous', 'above', 'other', 'another', 'it', 'there', 'here', 'of those', 'of them', 'of these', 'what about', 'how about', 'about')
+    pattern = r'\b(?:' + '|'.join(re.escape(r) for r in refs) + r')\b'
+    if re.search(pattern, q):
         return True
-    refs = ('these', 'those', 'them', 'that', 'this', 'same', 'previous', 'above')
-    if any((r in question.lower() for r in refs)):
+    if len(tokens) <= 4:
         return True
-    if previous.entity_scope and len(tokens) <= 14:
+    start_words = ('how', 'show', 'rank', 'give', 'what', 'list', 'count', 'which', 'who', 'where', 'when', 'why', 'can')
+    if len(tokens) <= 7 and tokens[0] not in start_words:
         return True
-    return bool(context.strip())
+    return False
 
 def merge_scope(previous: AnalyticalPlan | None, proposed: AnalyticalPlan, *, inherit: bool, question: str='') -> tuple[AnalyticalPlan, dict[str, Any]]:
     (merged, audit) = preserve_sticky_scope(previous, proposed, question=question, inherit=inherit)

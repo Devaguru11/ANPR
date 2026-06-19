@@ -1,8 +1,17 @@
 const jwt = require("jsonwebtoken");
 
 const JWT_SECRET = process.env.JWT_SECRET || "anpr-demo-jwt-secret";
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || "";
 
 function requireAuth(req, res, next) {
+  // Allow internal service-to-service calls via X-Internal-Key header.
+  // This lets the Python assistant_enhance_service call dashboard endpoints
+  // without going through the browser JWT flow.
+  if (INTERNAL_API_KEY && req.headers["x-internal-key"] === INTERNAL_API_KEY) {
+    req.user = { id: 0, email: "internal@service", role: "INTERNAL" };
+    return next();
+  }
+
   const h = String(req.headers.authorization || "");
   const m = /^Bearer\s+(.+)$/i.exec(h);
   if (!m) {
@@ -24,3 +33,4 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = { requireAuth };
+

@@ -30,17 +30,43 @@ class ReferenceResolver:
     async def resolve(self, question: str, analytical_state: dict[str, Any], prior_result_set: dict[str, Any] | None, prior_analytics: dict[str, Any] | None, *, conversation_context: str='') -> ReferenceResolution:
         if not analytical_state.get('active_plan') and (not prior_analytics):
             return ReferenceResolution(reasoning='no prior analytical context', resolution_tier='skipped')
-        user = f'Question: {question}\n\nConversation:\n{conversation_context[:1500]}\n\nAnalytical state:\n{json.dumps(analytical_state, default=str)}\n\nPrevious analytics output:\n{json.dumps(prior_analytics or {}, default=str)}\n\nPrevious result set:\n{json.dumps(prior_result_set or {}, default=str)}\n\nReturn JSON: {{"has_analytical_reference":true|false, "confidence":0.0-1.0, "reasoning":"...", "resolved_reference":{{"location":null|"Chowking", "camera_id":null|"AEYE_5", "violation_type":null|"NO_HELMET", "vehicle_type":null, "vehicle_category":null, "plate_suffix":null, "metric":null|"violations", "time_range":null|"this_month"|{{"preset":"yesterday"}}, "dimension":null|"violation_type", "count_hint":null|692}}}}'
+        user = f'Question: {question}\n\nConversation:\n{conversation_context[:1500]}\n\nAnalytical state:\n{json.dumps(analytical_state, default=str)}\n\nPrevious analytics output:\n{json.dumps(prior_analytics or {}, default=str)}\n\nPrevious result set:\n{json.dumps(prior_result_set or {}, default=str)}\n\nReturn JSON: {{"has_analytical_reference":true|false, "confidence":0.0-1.0, "reasoning":"...", "resolved_reference":{{"location":null, "camera_id":null, "violation_type":null, "vehicle_type":null, "vehicle_category":null, "plate_suffix":null, "metric":null, "time_range":null, "dimension":null, "count_hint":null}}}}'
         try:
             data = await self.llm.chat_json(REFERENCE_SYSTEM, user)
-            return self._parse(data)
+            return self._parse(data, analytical_state, prior_result_set, prior_analytics)
         except Exception:
             return ReferenceResolution(confidence=0.3, reasoning='reference resolver fallback: no resolution', resolution_tier='fallback')
 
-    def _parse(self, data: dict[str, Any]) -> ReferenceResolution:
+    def _parse(self, data: dict[str, Any], analytical_state: dict[str, Any], prior_result_set: dict[str, Any] | None, prior_analytics: dict[str, Any] | None) -> ReferenceResolution:
         ref_raw = data.get('resolved_reference')
         ref = dict(ref_raw) if isinstance(ref_raw, dict) else {}
-        ref = {k: v for (k, v) in ref.items() if v is not None and v != ''}
+        ref = {k: v for (k, v) in ref.items() if v is not None and v != '' and str(v).lower() not in ('unknown', 'null', 'none', 'default')}
+        
+        # Enforce validation of entity filter values to prevent LLM hallucinations
+        prior_str = (
+            json.dumps(analytical_state, default=str) + " " +
+            json.dumps(prior_result_set or {}, default=str) + " " +
+            json.dumps(prior_analytics or {}, default=str)
+        ).lower()
+        
+        entity_keys = {'location', 'camera_id', 'violation_type', 'vehicle_type', 'vehicle_category', 'plate_suffix'}
+        cleaned_ref = {}
+        for k, v in ref.items():
+            if k in entity_keys:
+                v_str = str(v).lower()
+                if v_str in prior_str:
+                    cleaned_ref[k] = v
+                elif k == 'location' and 'camera_id' in ref and str(ref['camera_id']).lower() in prior_str:
+                    cleaned_ref[k] = v
+            else:
+                cleaned_ref[k] = v
+        ref = cleaned_ref
+        
+        if 'violation_type' in ref:
+            from app.entity.canonical import VIOLATION_LABELS
+            val_upper = str(ref['violation_type']).upper().replace(' ', '_').replace('-', '_')
+            if val_upper not in VIOLATION_LABELS:
+                ref.pop('violation_type', None)
         conf = float(data.get('confidence', 0.5))
         conf = max(0.0, min(1.0, conf))
         has_ref = bool(data.get('has_analytical_reference')) and bool(ref)

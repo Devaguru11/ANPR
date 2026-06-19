@@ -32,6 +32,9 @@ def _first_human_name(*candidates: Any) -> str | None:
 def normalize_entity_scope(scope: dict[str, Any] | None, *, camera_names: dict[str, str] | None=None) -> dict[str, Any]:
     if not scope:
         return {}
+    scope = {k: v for k, v in scope.items() if v is not None and v != '' and str(v).lower() not in ('default', 'unknown', 'null', 'none')}
+    if not scope:
+        return {}
     names = camera_names or KNOWN_CAMERA_NAMES
     out = dict(scope)
     cam_id = out.get('camera_id')

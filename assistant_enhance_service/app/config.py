@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     legacy_engine_timeout: int = 60
     sql_max_rows: int = 10000
     sql_timeout_seconds: int = 30
+    node_server_url: str = 'http://127.0.0.1:4001'
+    internal_api_key: str = 'anpr-internal-service-key'
     entity_cache_refresh_seconds: int = 300
     semantic_context_max_chars: int = 400
     semantic_cache_enabled: bool = True

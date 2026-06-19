@@ -20,7 +20,7 @@ class AnalyticalPlanner:
     async def plan(self, question: str, conversation_context: str, previous_mem_plan: dict[str, Any] | None, entity_resolutions: list[dict[str, Any]], entity_scope: dict[str, Any], resolved_objective: ObjectiveResolution, resolved_dimension: DimensionResolution, resolved_temporal: TemporalResolution, retrieval_scope: str | None=None, business_resolution: BusinessSemanticResolution | None=None) -> tuple[AnalyticalPlan, dict[str, Any]]:
         previous = load_previous_plan(previous_mem_plan)
         inherit = previous is not None and should_inherit(question, conversation_context, previous)
-        proposed = self._construct_plan(question, previous, entity_scope, resolved_objective, resolved_dimension, resolved_temporal, retrieval_scope, business_resolution)
+        proposed = self._construct_plan(question, previous if inherit else None, entity_scope, resolved_objective, resolved_dimension, resolved_temporal, retrieval_scope, business_resolution)
         (merged, modifications) = merge_scope(previous, proposed, inherit=inherit, question=question)
         self._apply_transformable_semantics(merged, resolved_objective, resolved_dimension)
         promotion = promote_analysis_dimension(merged, question, resolved_dimension=resolved_dimension.dimension)
@@ -180,6 +180,8 @@ class AnalyticalPlanner:
         if plan.query_mode == 'trend_analysis':
             breakdown_dims = [d for d in breakdown_dims if d in time_dims][:1]
         resolved_dim = resolved_dimension.dimension
+        if resolved_dim == 'camera':
+            resolved_dim = 'camera_id'
         if resolved_dim and plan.user_objective in ('breakdown', 'ranking', 'growth', 'trend'):
             plan.dimensions = [resolved_dim]
             plan.group_by = [resolved_dim]

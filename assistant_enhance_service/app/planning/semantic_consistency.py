@@ -75,6 +75,8 @@ def enforce_semantic_consistency(plan: AnalyticalPlan, *, resolved_dimension: st
 
 def _apply_dimension_grouping(plan: AnalyticalPlan, resolved_dimension: str | None, repairs: list[str]) -> None:
     dim = resolved_dimension
+    if dim == 'camera':
+        dim = 'camera_id'
     if not dim and plan.dimensions:
         dim = plan.dimensions[0]
     if not dim:

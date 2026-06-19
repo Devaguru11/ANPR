@@ -105,8 +105,14 @@ class SemanticResolver:
         dim = None if raw_dim in (None, 'null', '') else str(raw_dim)
         if dim and dim not in dimension_names():
             dim = None
-        entities = dict(data.get('entities') or {})
-        tr = dict(data.get('time_range') or {'preset': 'last_30_days'})
+        entities = {k: v for (k, v) in dict(data.get('entities') or {}).items() if v is not None and v != '' and str(v).lower() not in ('unknown', 'null', 'none', 'default')}
+        tr_raw = data.get('time_range')
+        if isinstance(tr_raw, dict):
+            tr = dict(tr_raw)
+        elif isinstance(tr_raw, str):
+            tr = {'preset': tr_raw}
+        else:
+            tr = {'preset': 'last_30_days'}
         scope = RetrievalScopeSpec.parse(str(data.get('retrieval_scope') or 'default')).to_label()
         conf = max(0.0, min(1.0, float(data.get('confidence', 0.7))))
         if obj == 'record_detail' and conf < self.LOW and prior_obj and (prior_obj != 'record_detail'):

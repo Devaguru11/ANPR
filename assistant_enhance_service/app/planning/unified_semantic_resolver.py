@@ -70,7 +70,7 @@ class UnifiedSemanticResolver(SemanticResolver):
         if reporting.get('conversation_year'):
             state['conversation_year'] = reporting['conversation_year']
         metadata = json.dumps(state, default=str)
-        user = f'Question: {question}\n\nToday (UTC): {datetime.utcnow():%Y-%m-%d}\nContext:\n{context}\n\nActive state:\n{metadata}\n\n{catalog_text}\n\n{dimension_resolver_prompt()}\n\n{semantic_model_prompt()}\n\nReturn JSON:\n{{"business_candidates":[{{"concept":"...","confidence":0.0-1.0}},...], "dimension_candidates":[{{"dimension":"...|null","confidence":0.0-1.0}},...], "business_concept":"...", "objective":"...", "dimension":"...|null", "entities":{{"location":"...", "violation_type":"...", "vehicle_type":"...", "plate_suffix":"..."}}, "time_range":{{"preset":"today|specific_date|..."}}, "retrieval_scope":"all|first_10|latest_20|top_5|sample|single|default", "confidence":0.0-1.0, "reasoning":"...", "alternatives":["..."]}}'
+        user = f'Question: {question}\n\nToday (UTC): {datetime.utcnow():%Y-%m-%d}\nContext:\n{context}\n\nActive state:\n{metadata}\n\n{catalog_text}\n\n{dimension_resolver_prompt()}\n\n{semantic_model_prompt()}\n\nReturn JSON:\n{{"business_candidates":[{{"concept":"...","confidence":0.0-1.0}},...], "dimension_candidates":[{{"dimension":"...|null","confidence":0.0-1.0}},...], "business_concept":"...", "objective":"...", "dimension":"...|null", "entities":{{"location":"...", "violation_type":"...", "vehicle_type":"...", "plate_suffix":"..."}}, "time_range":{{"preset":"this_month"}}, "retrieval_scope":"all|first_10|latest_20|top_5|sample|single|default", "confidence":0.0-1.0, "reasoning":"...", "alternatives":["..."]}}'
         prompt_metrics = breakdown_prompt(UNIFIED_SYSTEM, user, catalog=catalog_text, metadata=metadata, context=context)
         timing.stop('prompt_construction', t_prompt)
         if cached:
@@ -106,6 +106,8 @@ class UnifiedSemanticResolver(SemanticResolver):
         semantic = self._apply_transformation_boost(semantic, prior_obj, question)
         semantic = self._apply_confidence_recovery(semantic, previous, prior_obj, question)
         semantic = self._apply_objective_evidence_policy(semantic, question, prior_obj)
+        if not cached:
+            semantic = self._apply_dimension_scoring(semantic, data, question, previous, inherit)
         semantic = self._apply_hour_ranking_priority(semantic, question)
         business = self._apply_business_recovery(business, prior_concept)
         if settings.semantic_cache_enabled and (not inherit) and (not cached) and (business.confidence >= 0.5) and (semantic.objective != 'record_detail'):
@@ -144,7 +146,7 @@ class UnifiedSemanticResolver(SemanticResolver):
             return {'business_concept': prior_concept or default_concept(), 'objective': prior_obj or default_objective(), 'dimension': previous.dimensions[0] if previous and previous.dimensions else None, 'entities': {}, 'time_range': active_tr, 'retrieval_scope': 'default', 'confidence': 0.4, 'alternatives': [], 'reasoning': 'fallback: unified semantic resolver unavailable'}
 
     def _parse_business(self, data: dict[str, Any], prior_concept: str | None, *, question: str='', conversation_context: str='', prior_metric: str | None=None, inherit: bool=False) -> BusinessSemanticResolution:
-        candidates = extract_candidates(data, prior_concept)
+        candidates = extract_candidates(data, prior_concept, question=question)
         llm_conf = max(0.0, min(1.0, float(data.get('confidence', 0.7))))
         selection = score_candidates(question, candidates, prior_concept=prior_concept, prior_metric=prior_metric, inherit=inherit, conversation_context=conversation_context, llm_confidence=llm_conf)
         alts = [c for c in selection.candidates if c != selection.business_concept][:3]

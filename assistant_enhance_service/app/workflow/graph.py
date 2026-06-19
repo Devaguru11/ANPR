@@ -27,6 +27,162 @@ from app.sql.validator import SQLValidator
 from app.llm.call_tracker import get_llm_calls, reset_llm_calls
 from app.workflow.state import GraphState
 from app.workflow.timing_report import build_prompt_audit, build_timing_report
+from app.section_api.intent_router import classify_intent, IntentResult, SectionIntent
+from app.section_api import client as section_client
+from app.section_api.narrator import narrate as section_narrate
+
+
+def _make_ir(intent: SectionIntent, params: dict, state: dict) -> IntentResult:
+    """Build an IntentResult from graph state for use by the narrator."""
+    return IntentResult(
+        intent=intent,
+        confidence=state.get('section_confidence', 0.0),
+        vehicle_type=params.get('vehicle_type'),
+        violation_type=params.get('violation_type'),
+        plate=params.get('plate'),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Direct date-range parser (no LLM) for the section router
+# Handles patterns like:
+#   "between June 12th and June 15th"
+#   "between 12th and 17th June"
+#   "on June 14th"
+#   "today", "this month", "last month", "this week"
+#   "June 13th", "June 2026"
+# ---------------------------------------------------------------------------
+
+_MONTH_MAP: dict[str, int] = {
+    'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
+    'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6, 'jul': 7, 'july': 7,
+    'aug': 8, 'august': 8, 'sep': 9, 'sept': 9, 'september': 9,
+    'oct': 10, 'october': 10, 'nov': 11, 'november': 11, 'dec': 12, 'december': 12,
+}
+
+
+def _day_num(s: str) -> int:
+    """'12th' → 12"""
+    return int(re.sub(r'[^\d]', '', s))
+
+
+def _to_ymd(year: int, month: int, day: int) -> str:
+    return f'{year:04d}-{month:02d}-{day:02d}'
+
+
+def _current_year() -> int:
+    from datetime import datetime
+    return datetime.utcnow().year
+
+
+def _current_month() -> int:
+    from datetime import datetime
+    return datetime.utcnow().month
+
+
+def _parse_date_range_from_question(question: str) -> dict | None:
+    """
+    Try to extract an explicit date range directly from the question text.
+    Returns a time_range dict compatible with resolve_date_range(), or None
+    if no explicit date is found (caller should fall back to LLM temporal resolver).
+    """
+    q = question.lower()
+    year = _current_year()
+
+    # ── preset shortcuts ──────────────────────────────────────────────────
+    if re.search(r'\btoday\b', q):
+        return {'preset': 'today'}
+    if re.search(r'\byesterday\b', q):
+        return {'preset': 'yesterday'}
+    if re.search(r'\bthis\s+week\b', q):
+        return {'preset': 'this_week'}
+    if re.search(r'\bthis\s+month\b', q):
+        return {'preset': 'this_month'}
+    if re.search(r'\blast\s+month\b', q):
+        return {'preset': 'last_month'}
+    if re.search(r'\blast\s+7\s+days\b', q):
+        return {'preset': 'last_7_days'}
+    if re.search(r'\blast\s+30\s+days\b', q):
+        return {'preset': 'last_30_days'}
+
+    # ── "between DAY1 and DAY2 MONTH" e.g. "between 12th and 17th june" ──
+    m = re.search(
+        r'between\s+(\d{1,2})(?:st|nd|rd|th)?\s+and\s+(\d{1,2})(?:st|nd|rd|th)?\s+'
+        r'(' + '|'.join(_MONTH_MAP) + r')',
+        q,
+    )
+    if m:
+        d1, d2, mon = int(m.group(1)), int(m.group(2)), _MONTH_MAP[m.group(3)]
+        return {'preset': 'specific_date', 'start': _to_ymd(year, mon, d1), 'end': _to_ymd(year, mon, d2)}
+
+    # ── "between MONTH DAY1 and MONTH DAY2" e.g. "between june 12 and june 15" ──
+    m = re.search(
+        r'between\s+(' + '|'.join(_MONTH_MAP) + r')\s+(\d{1,2})(?:st|nd|rd|th)?\s+'
+        r'and\s+(?:(' + '|'.join(_MONTH_MAP) + r')\s+)?(\d{1,2})(?:st|nd|rd|th)?',
+        q,
+    )
+    if m:
+        mon1 = _MONTH_MAP[m.group(1)]
+        d1 = int(m.group(2))
+        mon2 = _MONTH_MAP[m.group(3)] if m.group(3) else mon1
+        d2 = int(m.group(4))
+        return {'preset': 'specific_date', 'start': _to_ymd(year, mon1, d1), 'end': _to_ymd(year, mon2, d2)}
+
+    # ── "between DAY1 MONTH and DAY2 MONTH" e.g. "between 12th june and 17th june" ──
+    m = re.search(
+        r'between\s+(\d{1,2})(?:st|nd|rd|th)?\s+(' + '|'.join(_MONTH_MAP) + r')\s+'
+        r'and\s+(\d{1,2})(?:st|nd|rd|th)?\s+(?:(' + '|'.join(_MONTH_MAP) + r'))?',
+        q,
+    )
+    if m:
+        d1, mon1 = int(m.group(1)), _MONTH_MAP[m.group(2)]
+        d2 = int(m.group(3))
+        mon2 = _MONTH_MAP[m.group(4)] if m.group(4) else mon1
+        return {'preset': 'specific_date', 'start': _to_ymd(year, mon1, d1), 'end': _to_ymd(year, mon2, d2)}
+
+    # ── single date: "on MONTH DAY" or "MONTH DAY" e.g. "on June 14th" ──
+    m = re.search(
+        r'\b(?:on\s+)?(' + '|'.join(_MONTH_MAP) + r')\b\s+(\d{1,2})\b(?:st|nd|rd|th)?\b(?!\s*\d{4})',
+        q,
+    )
+    if m:
+        mon, day = _MONTH_MAP[m.group(1)], int(m.group(2))
+        date = _to_ymd(year, mon, day)
+        return {'preset': 'specific_date', 'start': date, 'end': date}
+
+    # ── "DAY MONTH" e.g. "14th June" ──
+    m = re.search(
+        r'\b(\d{1,2})\b(?:st|nd|rd|th)?\s+\b(' + '|'.join(_MONTH_MAP) + r')\b',
+        q,
+    )
+    if m:
+        day, mon = int(m.group(1)), _MONTH_MAP[m.group(2)]
+        date = _to_ymd(year, mon, day)
+        return {'preset': 'specific_date', 'start': date, 'end': date}
+
+    # ── whole month: "in june" / "june 2026" ──
+    m = re.search(
+        r'\b(?:in\s+)?(' + '|'.join(_MONTH_MAP) + r')\b(?:\s+(\d{4}))?\b(?!\s*\d)',
+        q,
+    )
+    if m:
+        mon = _MONTH_MAP[m.group(1)]
+        yr = int(m.group(2)) if m.group(2) else year
+        from datetime import datetime, timedelta
+        import calendar
+        last_day = calendar.monthrange(yr, mon)[1]
+        # Don't return a future full month — cap at today if current month
+        today = datetime.utcnow()
+        if yr == today.year and mon == today.month:
+            return {'preset': 'this_month'}
+        return {
+            'preset': 'specific_date',
+            'start': _to_ymd(yr, mon, 1),
+            'end': _to_ymd(yr, mon, last_day),
+        }
+
+    return None
+
 
 @dataclass
 class Services:
@@ -53,10 +209,15 @@ class AnalyticsWorkflow:
         self.sql_builder = SQLBuilder()
         self._graph = self._build()
 
+    # Confidence threshold: above this → use section API, below → LLM SQL fallback
+    SECTION_CONFIDENCE_THRESHOLD = 0.42
+
     def _build(self):
         g = StateGraph(GraphState)
         g.add_node('analytical_reference_resolver', self.analytical_reference_resolver_node)
         g.add_node('unified_semantic_resolver', self.unified_semantic_resolver_node)
+        g.add_node('section_router', self.section_router_node)
+        g.add_node('section_api_fetcher', self.section_api_fetcher_node)
         g.add_node('analytical_planner', self.analytical_planner)
         g.add_node('sql_generator', self.sql_generator)
         g.add_node('sql_validator', self.sql_validator)
@@ -65,7 +226,16 @@ class AnalyticsWorkflow:
         g.add_node('response_generator', self.response_generator)
         g.add_edge(START, 'analytical_reference_resolver')
         g.add_edge('analytical_reference_resolver', 'unified_semantic_resolver')
-        g.add_edge('unified_semantic_resolver', 'analytical_planner')
+        g.add_edge('unified_semantic_resolver', 'section_router')
+        g.add_conditional_edges(
+            'section_router',
+            self._route_after_section_router,
+            {
+                'section_api': 'section_api_fetcher',
+                'llm_sql': 'analytical_planner',
+            },
+        )
+        g.add_edge('section_api_fetcher', END)
         g.add_edge('analytical_planner', 'sql_generator')
         g.add_edge('sql_generator', 'sql_validator')
         g.add_edge('sql_validator', 'sql_executor')
@@ -73,6 +243,30 @@ class AnalyticsWorkflow:
         g.add_edge('analytics_engine', 'response_generator')
         g.add_edge('response_generator', END)
         return g.compile()
+
+    def _route_after_section_router(self, state: GraphState) -> str:
+        """Conditional edge: if section intent is confident, use section API path."""
+        intent = state.get('section_intent')
+        confidence = state.get('section_confidence', 0)
+        entities = state.get('entity_scope') or state.get('entities') or {}
+        
+        # Specific filters that require LLM SQL path:
+        has_camera = bool(entities.get('camera_id') or entities.get('location'))
+        has_plate = bool(entities.get('plate_suffix'))
+        has_violation_type = bool(entities.get('violation_type'))
+        
+        # If the query contains camera or plate filters, we must use LLM SQL since Section API does not pass/support them fully.
+        if has_camera or has_plate:
+            return 'llm_sql'
+            
+        # If the query asks for violations summary (count) or camera rankings (busiest cameras) with a specific violation type filter, we must use LLM SQL.
+        if intent in ('violations_summary', 'violations_by_camera') and has_violation_type:
+            return 'llm_sql'
+            
+        if intent and confidence >= self.SECTION_CONFIDENCE_THRESHOLD:
+            return 'section_api'
+            
+        return 'llm_sql'
 
     async def run(self, session_id: str, question: str) -> GraphState:
         reset_llm_calls()
@@ -117,6 +311,152 @@ class AnalyticsWorkflow:
         mem['last_analytical_state'] = state.get('analytical_state') or mem.get('last_analytical_state')
         self.s.memory.save(session_id, mem)
         self.s.logger.write(session_id, {'question': state.get('question'), 'context': state.get('conversation_context'), 'intent': state.get('intent'), 'reference_resolution': state.get('reference_resolution'), 'semantic_resolution': state.get('semantic_resolution'), 'business_semantic_resolution': state.get('business_semantic_resolution'), 'objective_resolution': state.get('objective_resolution'), 'entities': state.get('entities'), 'confidence': state.get('confidence'), 'plan': plan, 'sql': state.get('sql'), 'rows': state.get('row_count'), 'latency': state.get('latencies'), 'semantic_timing': state.get('semantic_timing'), 'prompt_metrics': state.get('prompt_metrics'), 'prompt_audit': state.get('prompt_audit'), 'timing_report': state.get('timing_report'), 'llm_calls': state.get('llm_calls'), 'answer': state.get('final_answer'), 'errors': error or state.get('error')})
+
+    # -----------------------------------------------------------------------
+    # Section router node — classify intent, extract params, decide route
+    # -----------------------------------------------------------------------
+
+    async def section_router_node(self, state: GraphState) -> GraphState:
+        """Classify the question into a section intent using keyword scoring."""
+        t = Timer()
+        question = state.get('normalized_question') or state.get('question', '')
+
+        # 1. Try to parse date ranges directly from the question text (no LLM needed).
+        #    This is more reliable than the LLM temporal resolver for explicit date spans
+        #    like "between June 12th and June 15th".
+        direct_time_range = _parse_date_range_from_question(question)
+
+        # 2. Fall back to the temporal resolution from unified_semantic_resolver.
+        if not direct_time_range:
+            temporal = state.get('temporal_resolution') or {}
+            direct_time_range = temporal.get('time_range') or {}
+
+        ir = classify_intent(question, direct_time_range)
+        state['section_intent'] = ir.intent.value
+        state['section_confidence'] = ir.confidence
+        state['section_params'] = {
+            'vehicle_type': ir.vehicle_type,
+            'violation_type': ir.violation_type,
+            'plate': ir.plate,
+        }
+        state['section_time_range'] = direct_time_range
+        state.setdefault('latencies', {})['section_router_ms'] = t.elapsed_ms()
+        return state
+
+    # -----------------------------------------------------------------------
+    # Section API fetcher node — call the Node REST endpoint + narrate
+    # -----------------------------------------------------------------------
+
+    async def section_api_fetcher_node(self, state: GraphState) -> GraphState:
+        """Call the relevant Node.js REST endpoint and narrate the result."""
+        t = Timer()
+        intent_str = state.get('section_intent', 'unknown')
+        params = state.get('section_params') or {}
+        time_range = state.get('section_time_range') or {}
+
+        try:
+            intent = SectionIntent(intent_str)
+        except ValueError:
+            intent = SectionIntent.UNKNOWN
+
+        from_date, to_date = section_client.resolve_date_range(time_range)
+
+        try:
+            data: dict[str, Any] = {}
+
+            if intent == SectionIntent.VIOLATIONS_SUMMARY:
+                data = await section_client.fetch_violations_summary(
+                    from_date, to_date,
+                    camera_id=params.get('camera_id'),
+                    plate=params.get('plate'),
+                )
+
+            elif intent == SectionIntent.VIOLATIONS_BY_CAMERA:
+                data = await section_client.fetch_violations_by_camera(from_date, to_date)
+
+            elif intent == SectionIntent.VIOLATIONS_LIST:
+                data = await section_client.fetch_violations_list(
+                    from_date, to_date,
+                    violation_type=params.get('violation_type'),
+                    plate=params.get('plate'),
+                )
+
+            elif intent == SectionIntent.PLATE_READS:
+                data = await section_client.fetch_range_stats(
+                    from_date, to_date,
+                    vehicle_type=params.get('vehicle_type'),
+                )
+
+            elif intent == SectionIntent.OVERVIEW:
+                data = await section_client.fetch_overview(from_date, to_date)
+
+            elif intent == SectionIntent.RECIDIVISM:
+                data = await section_client.fetch_recidivism()
+
+            elif intent == SectionIntent.CAMERA_STATUS:
+                data = await section_client.fetch_overview(from_date, to_date)
+
+            else:
+                # Should not reach here — router should have sent unknown to LLM path
+                state['final_answer'] = 'I could not complete that analytics request. Please try rephrasing.'
+                state.setdefault('latencies', {})['section_api_ms'] = t.elapsed_ms()
+                return state
+
+            answer = section_narrate(intent, data, _make_ir(intent, params, state), from_date, to_date)
+            state['final_answer'] = answer
+            state['section_api_data'] = data
+
+            metric = 'violations'
+            if intent == SectionIntent.PLATE_READS:
+                metric = 'detections'
+            elif intent == SectionIntent.OVERVIEW:
+                metric = 'overview'
+            elif intent == SectionIntent.CAMERA_STATUS:
+                metric = 'cameras'
+
+            from app.planning.plan import AnalyticalPlan
+            from app.planning.conversation_state import persist_turn_state
+
+            ap = AnalyticalPlan(
+                intent=intent_str,
+                user_objective='metric_summary',
+                metric=metric,
+                time_range=time_range,
+                query_mode='count',
+                entity_scope={}
+            )
+            mem = self.s.memory.load(state['session_id'])
+            envelope = persist_turn_state(mem, ap)
+            state['plan'] = envelope
+            # Clear entities to avoid filter bleed in memory context
+            state['entities'] = {}
+
+        except Exception as exc:
+            # On any HTTP/network error, gracefully fall back to error message
+            import logging
+            logging.getLogger(__name__).warning('section_api_fetcher error: %s', exc)
+            state['final_answer'] = (
+                'I was unable to fetch the data right now. '
+                'Please check that the server is running, or try rephrasing your question.'
+            )
+
+        # NOTE: We intentionally do NOT write to LLM conversation memory here.
+        # The section API path is stateless — each question is answered directly
+        # from the REST API using the question's own date/intent context.
+        # Saving the full answer text (which contains camera names, location names etc.)
+        # would cause those entity names to bleed into the next LLM SQL fallback question.
+
+        state.setdefault('debug_context', {}).update({
+            'section_intent': intent_str,
+            'section_confidence': state.get('section_confidence'),
+            'section_params': params,
+            'section_time_range': time_range,
+            'from_date': from_date,
+            'to_date': to_date,
+        })
+        state['debug'] = state['debug_context']
+        state.setdefault('latencies', {})['section_api_ms'] = t.elapsed_ms()
+        return state
 
     async def analytical_reference_resolver_node(self, state: GraphState) -> GraphState:
         t = Timer()
@@ -317,7 +657,47 @@ class AnalyticsWorkflow:
         else:
             ao = state.get('analytics_output') or {}
             answer = ao.get('composed_answer') or ao.get('summary')
-            state['final_answer'] = answer if answer else 'No data was returned for this query.'
+            
+            # Phrase and structure the response using the LLM for high-quality natural language output
+            question = state.get('question', '')
+            sql_query = state.get('sql', '')
+            columns = state.get('columns', [])
+            rows = state.get('rows', [])
+            row_count = state.get('row_count', 0)
+            
+            sys_msg = (
+                "You are an expert AI Data Assistant for an Automatic Number Plate Recognition (ANPR) and traffic enforcement dashboard.\n"
+                "Your job is to write, phrase, and structure the final answer for the user based on the database query results and a draft summary.\n\n"
+                "Strict Guidelines:\n"
+                "1. Base your answer strictly on the provided SQL query results and draft summary. Do not invent any numbers, plates, or cameras.\n"
+                "2. Use clean markdown formatting. Use bolding, bullet points, or simple markdown tables where appropriate to make the data highly readable and premium.\n"
+                "3. Keep the tone professional, helpful, and concise.\n"
+                "4. If no data was returned, explain that politely.\n"
+                "5. Return only the phrased final answer. Do not include JSON structures, system labels, or conversational preambles."
+            )
+            
+            subset_rows = rows[:15]
+            rows_str = str(subset_rows)
+            if len(rows) > 15:
+                rows_str += f"\n... and {len(rows) - 15} more rows"
+                
+            user_msg = (
+                f"User Question: {question}\n\n"
+                f"Draft Summary: {answer}\n\n"
+                f"SQL Query Executed: {sql_query}\n\n"
+                f"Columns Returned: {columns}\n"
+                f"Sample Data Rows: {rows_str}\n"
+                f"Total Data Rows Count: {row_count}\n"
+            )
+            
+            try:
+                formatted_answer = await self.s.llm.chat(sys_msg, user_msg, max_tokens=1024)
+                if formatted_answer and formatted_answer.strip():
+                    state['final_answer'] = formatted_answer.strip()
+                else:
+                    state['final_answer'] = answer if answer else 'No data was returned for this query.'
+            except Exception:
+                state['final_answer'] = answer if answer else 'No data was returned for this query.'
         plan = state.get('plan', {})
         ap = plan.get('analytical_plan', {})
         sem_res = state.get('semantic_resolution') or plan.get('semantic_resolution') or {}
